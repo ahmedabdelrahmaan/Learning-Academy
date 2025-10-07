@@ -6,648 +6,463 @@
     <title>Intelligent Learning Platform</title>
     <!-- Tailwind CSS for modern, responsive design -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Google Fonts for better typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #4f46e5;
+            --primary-hover: #4338ca;
+            --bg-light: #f8fafc;
+            --text-dark: #1f2937;
+            --card-bg-light: #ffffff;
+        }
+
+        /* Dark Mode variables */
+        .dark {
+            --bg-light: #111827;
+            --text-dark: #f3f4f6;
+            --card-bg-light: #1f2937;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-light);
+            color: var(--text-dark);
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .card {
+            background-color: var(--card-bg-light);
+            transition: background-color 0.3s;
+        }
+
+        .modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+        }
+
+        /* Custom scrollbar for better look in dark mode */
+        .overflow-y-auto::-webkit-scrollbar {
+            width: 8px;
+        }
+        .overflow-y-auto::-webkit-scrollbar-thumb {
+            background-color: var(--primary-color);
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <!-- Global Toast Container -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-3"></div>
+
+    <!-- Main Application Container -->
+    <div id="app-container" class="max-w-7xl mx-auto p-4 md:p-8">
+        <!-- Header and Navigation will be rendered here -->
+    </div>
+
+    <!-- Universal Modal Container (always hidden initially) -->
+    <div id="modal-container" class="hidden"></div>
+
+
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, addDoc, getDocs, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { 
+            getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, doc, setDoc, onSnapshot, collection, query, where, addDoc, 
+            serverTimestamp, getDoc, getDocs, updateDoc, writeBatch, deleteDoc 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { 
+            getStorage, ref, uploadBytes, getDownloadURL 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
+        
+        // ====================================================================
+        // 1. CONFIGURATION & STATE MANAGEMENT
+        // ====================================================================
 
-        // Global Firebase variables will be populated after initialization
-        window.firebase = {
-            app: null,
+        // Global state object to manage the application data and services
+        const appState = {
             db: null,
             auth: null,
-            provider: new GoogleAuthProvider(),
+            storage: null,
+            userId: null,
+            userProfile: null,
+            currentPage: 'home',
+            pageParams: {},
+            isAuthReady: false,
+            isDarkMode: localStorage.getItem('darkMode') === 'true',
+            dataCache: {
+                courses: [],
+                subscriptions: [],
+                progress: new Set(),
+                userProfiles: new Map(), // Caching profiles by ID
+            }
         };
-        window.firestore = {
-            serverTimestamp: serverTimestamp,
-            doc: doc,
-            collection: collection,
-            query: query,
-            where: where,
-            setDoc: setDoc,
-            getDoc: getDoc,
-            updateDoc: updateDoc,
-            deleteDoc: deleteDoc,
-            onSnapshot: onSnapshot,
-            addDoc: addDoc,
-            getDocs: getDocs
+
+        // Environment variables (Mandatory for Canvas)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        const USERS_COLLECTION = `artifacts/${appId}/users`;
+        const PUBLIC_COLLECTION = `artifacts/${appId}/public/data`;
+        
+        // ====================================================================
+        // 2. UTILITY FUNCTIONS
+        // ====================================================================
+
+        /**
+         * Converts Firestore snapshot data to a clean array of objects with IDs.
+         * @param {QuerySnapshot} snapshot 
+         * @returns {Array}
+         */
+        const snapshotToData = (snapshot) => {
+            const data = [];
+            snapshot.forEach(doc => {
+                data.push({ id: doc.id, ...doc.data() });
+            });
+            return data;
         };
-        
-        // Expose functions globally for HTML event handlers
-        window.signInWithGoogle = signInWithGoogle;
-        window.handleRoleSelection = handleRoleSelection;
-        window.navigateTo = navigateTo;
-        window.closeModal = closeModal;
-        window.submitSubscription = submitSubscription;
-        window.markLessonAsDone = markLessonAsDone;
-        window.openCourseModal = openCourseModal;
-        window.openLessonModal = openLessonModal;
-        window.saveCourse = saveCourse;
-        window.deleteCourse = deleteCourse;
-        window.saveLesson = saveLesson;
-        window.deleteLesson = deleteLesson;
-        window.reviewSubscription = reviewSubscription;
-        window.updateProfile = updateProfile;
-        window.reorderLessons = reorderLessons;
-        window.signOutUser = signOutUser;
-        window.toggleReviewerRemark = toggleReviewerRemark;
 
-        // --- GLOBAL STATE & CONSTANTS ---
-        const IMGBB_API_KEY = "994244fa58d67f7d0f05ed58d03e7962";
-        const SUPER_ADMIN_EMAIL = "ahmed.abdelrahmany2018@gmail.com";
-        
-        let userProfile = null; // Stores role, displayName, email, id etc.
-        let isAuthReady = false;
-        
-        // Caching for Denormalization and reduced reads
-        let allTutors = [];
-        let allCourses = [];
-        let mySubscriptions = []; // Only user's subscriptions
-        let myProgress = []; // Only user's lesson progress
-        let subscriptionsToReview = []; // For Tutors/Admins
-
-        // --- HELPER FUNCTIONS (UI/UX) ---
-
-        function showToast(message, type = 'info') {
-            const toast = document.getElementById('toast-notification');
-            const colorClass = type === 'success' ? 'bg-green-500' : type === 'error' ? 'bg-red-500' : 'bg-blue-500';
-            toast.textContent = message;
-            toast.className = `fixed bottom-5 right-5 z-50 p-4 rounded-lg shadow-xl text-white ${colorClass} transition-opacity duration-300`;
-            toast.style.opacity = '1';
-            setTimeout(() => {
-                toast.style.opacity = '0';
-            }, 3000);
-        }
-
-        function showModal(id) {
-            document.getElementById(id).classList.remove('hidden');
-            document.getElementById(id).classList.add('flex');
-            document.body.classList.add('overflow-hidden');
-        }
-
-        function closeModal(id) {
-            document.getElementById(id).classList.add('hidden');
-            document.getElementById(id).classList.remove('flex');
-            document.body.classList.remove('overflow-hidden');
-        }
-
-        function navigateTo(pageId, data = {}) {
-            const contentDiv = document.getElementById('app-content');
-            
-            // Hide all pages
-            Array.from(contentDiv.children).forEach(child => child.classList.add('hidden'));
-
-            // Show target page
-            const targetPage = document.getElementById(pageId);
-            if (targetPage) {
-                targetPage.classList.remove('hidden');
-
-                // Render specific content based on the page
-                switch (pageId) {
-                    case 'landing':
-                        break;
-                    case 'dashboard':
-                        renderDashboard();
-                        break;
-                    case 'browse-tutors':
-                        renderTutorsList();
-                        break;
-                    case 'course-view':
-                        renderCoursePage(data.courseId);
-                        break;
-                    case 'admin-panel':
-                        renderAdminPanel();
-                        break;
-                    case 'profile-settings':
-                        renderProfileSettings();
-                        break;
-                    default:
-                        showToast('Page not found.', 'error');
-                        navigateTo('landing');
-                }
-            } else {
-                showToast('Navigation error: Target page element not found.', 'error');
-            }
-        }
-
-        // --- FIREBASE INITIALIZATION & AUTH ---
-
-        async function initializeAppAndAuth() {
-            try {
-                // Use global variables provided by the canvas environment
-                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-                if (!firebaseConfig) {
-                    console.error("Firebase config is missing.");
-                    return;
-                }
-                
-                // Set Firestore log level for debugging
-                setLogLevel('debug');
-
-                window.firebase.app = initializeApp(firebaseConfig);
-                window.firebase.db = getFirestore(window.firebase.app);
-                window.firebase.auth = getAuth(window.firebase.app);
-
-                // Initial sign-in with custom token or anonymously
-                if (initialAuthToken) {
-                    await signInWithCustomToken(window.firebase.auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(window.firebase.auth);
-                }
-
-                // Set up Auth State Listener
-                onAuthStateChanged(window.firebase.auth, async (user) => {
-                    if (user) {
-                        await fetchUserProfile(user);
-                    } else {
-                        userProfile = null;
-                        isAuthReady = true;
-                        updateNavbar();
-                        navigateTo('landing');
-                    }
-                });
-
-                // Start data listeners once DB is ready
-                setupDataListeners();
-                
-            } catch (error) {
-                console.error("Error during Firebase initialization:", error);
-                showToast(`Initialization failed: ${error.message}`, 'error');
-            }
-        }
-
-        async function fetchUserProfile(user) {
-            const userRef = doc(window.firebase.db, 'users', user.uid);
-            let userDoc = await getDoc(userRef);
-
-            if (!userDoc.exists()) {
-                // New user - prompt for role selection
-                userProfile = {
-                    id: user.uid,
-                    email: user.email || 'N/A',
-                    displayName: user.displayName || 'New User',
-                    role: null, // Will be set by role selection modal
-                    bio: '',
-                    tutorStatus: null, // Only for Tutors
-                    lastLogin: serverTimestamp(),
-                };
-                updateNavbar();
-                showModal('role-selection-modal');
-                navigateTo('landing');
-            } else {
-                // Existing user
-                userProfile = { id: user.uid, ...userDoc.data() };
-                isAuthReady = true;
-                updateNavbar();
-                
-                // Navigate based on state
-                if (userProfile.role === 'student') {
-                    navigateTo('dashboard');
-                } else if (userProfile.role === 'tutor' || userProfile.role === 'assistant' || userProfile.role === 'super_admin') {
-                    navigateTo('admin-panel');
-                } else {
-                    navigateTo('landing');
-                }
-            }
-        }
-        
-        async function signInWithGoogle() {
-            try {
-                await signInWithPopup(window.firebase.auth, window.firebase.provider);
-                // onAuthStateChanged listener handles the rest
-            } catch (error) {
-                console.error("Google sign-in error:", error);
-                showToast(`Sign-in failed: ${error.message}`, 'error');
-            }
-        }
-
-        async function handleRoleSelection(role) {
-            if (!userProfile || !window.firebase.auth.currentUser) return;
-            
-            const user = window.firebase.auth.currentUser;
-            const userRef = doc(window.firebase.db, 'users', user.uid);
-            
-            userProfile.role = role;
-            
-            let data = {
-                email: user.email || 'N/A',
-                displayName: user.displayName || `User_${user.uid.substring(0, 6)}`,
-                role: role,
-                bio: 'Please update your bio.',
-                lastLogin: serverTimestamp(),
-                createdAt: serverTimestamp(),
-                // Super Admin check
-                role: (user.email === SUPER_ADMIN_EMAIL) ? 'super_admin' : role
+        /**
+         * Displays a transient, non-blocking notification to the user.
+         * @param {string} message - The message to display.
+         * @param {'success' | 'error' | 'info'} type - The type of toast.
+         */
+        window.showToast = (message, type = 'info') => {
+            const container = document.getElementById('toast-container');
+            const colorMap = {
+                success: 'bg-green-500',
+                error: 'bg-red-500',
+                info: 'bg-blue-500'
             };
 
-            if (data.role === 'tutor') {
-                data.tutorStatus = 'underReview'; // Default for new tutors
-            }
+            const toast = document.createElement('div');
+            toast.className = `p-4 rounded-lg shadow-xl text-white ${colorMap[type] || 'bg-gray-700'} transition-all duration-300 transform translate-x-full opacity-0`;
+            toast.textContent = message;
 
-            try {
-                await setDoc(userRef, data, { merge: true });
-                userProfile = { id: user.uid, ...data }; // Update local profile
-                showToast(`Welcome, signed in as ${userProfile.role.toUpperCase()}!`, 'success');
-                closeModal('role-selection-modal');
-                isAuthReady = true;
-                updateNavbar();
-                navigateTo(userProfile.role === 'student' ? 'dashboard' : 'admin-panel');
-            } catch (error) {
-                console.error("Error setting user profile:", error);
-                showToast('Error setting up profile. Try again.', 'error');
-            }
-        }
+            container.appendChild(toast);
 
-        async function signOutUser() {
-            try {
-                await signOut(window.firebase.auth);
-                userProfile = null;
-                allTutors = [];
-                allCourses = [];
-                mySubscriptions = [];
-                myProgress = [];
-                subscriptionsToReview = [];
-                showToast('Signed out successfully.', 'success');
-                navigateTo('landing');
-            } catch (error) {
-                console.error("Sign out error:", error);
-                showToast('Error signing out.', 'error');
-            }
-        }
+            // Animate in
+            setTimeout(() => {
+                toast.classList.remove('translate-x-full', 'opacity-0');
+            }, 10);
 
-        // --- FIRESTORE LISTENERS (Caching) ---
-        
-        function setupDataListeners() {
-            if (!window.firebase.db) return;
+            // Animate out and remove
+            setTimeout(() => {
+                toast.classList.add('translate-x-full', 'opacity-0');
+                toast.addEventListener('transitionend', () => toast.remove());
+            }, 5000);
+        };
 
-            // 1. All Courses Listener (public data)
-            onSnapshot(collection(window.firebase.db, 'courses'), (snapshot) => {
-                allCourses = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                // Re-render components that rely on course data (e.g., admin panel, tutor list view)
-                if (document.getElementById('browse-tutors').classList.contains('hidden') === false) {
-                    renderTutorsList();
-                }
-                if (document.getElementById('admin-panel').classList.contains('hidden') === false) {
-                    renderAdminPanel();
-                }
-            }, (error) => console.error("Course listener error:", error));
+        // ====================================================================
+        // 3. ROUTING & RENDERING
+        // ====================================================================
 
-            // 2. All Tutors Listener (public data)
-            onSnapshot(query(collection(window.firebase.db, 'users'), where('role', 'in', ['tutor', 'super_admin'])), (snapshot) => {
-                allTutors = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                if (document.getElementById('browse-tutors').classList.contains('hidden') === false) {
-                    renderTutorsList();
-                }
-            }, (error) => console.error("Tutor listener error:", error));
+        /**
+         * Updates the application state and triggers a re-render.
+         * @param {string} page - The page key (e.g., 'dashboard', 'catalog').
+         * @param {object} params - Optional parameters for the page.
+         */
+        window.navigateTo = (page, params = {}) => {
+            appState.currentPage = page;
+            appState.pageParams = params;
+            // Update the URL history for back/forward navigation
+            history.pushState({ page, params }, '', `#${page}`);
+            renderApp();
+        };
 
-            // 3. User-Specific Subscriptions Listener
-            onAuthStateChanged(window.firebase.auth, (user) => {
-                if (user && userProfile?.role === 'student') {
-                    onSnapshot(query(collection(window.firebase.db, 'subscriptions'), where('userId', '==', user.uid)), (snapshot) => {
-                        mySubscriptions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        // Re-render dashboard
-                        if (document.getElementById('dashboard').classList.contains('hidden') === false) {
-                            renderDashboard();
-                        }
-                    }, (error) => console.error("Student subscription listener error:", error));
-
-                    // 4. User-Specific Progress Listener
-                    onSnapshot(collection(window.firebase.db, `users/${user.uid}/progress`), (snapshot) => {
-                        myProgress = snapshot.docs.map(doc => ({ lessonId: doc.id, ...doc.data() }));
-                        // Re-render dashboard
-                        if (document.getElementById('dashboard').classList.contains('hidden') === false) {
-                            renderDashboard();
-                        }
-                        // Re-render current course view if open
-                        const courseView = document.getElementById('course-view');
-                        if (courseView && courseView.dataset.courseId && courseView.classList.contains('hidden') === false) {
-                            renderCoursePage(courseView.dataset.courseId);
-                        }
-                    }, (error) => console.error("Student progress listener error:", error));
-                }
-            });
-
-            // 5. Review Subscriptions Listener (for Tutor/Admin)
-            onAuthStateChanged(window.firebase.auth, (user) => {
-                if (user && (userProfile?.role === 'tutor' || userProfile?.role === 'assistant' || userProfile?.role === 'super_admin')) {
-                    const q = userProfile.role === 'super_admin'
-                        ? collection(window.firebase.db, 'subscriptions') // Super Admin sees all
-                        : query(collection(window.firebase.db, 'subscriptions'), where('tutorId', '==', user.uid)); // Tutor sees only their courses
-
-                    onSnapshot(q, (snapshot) => {
-                        subscriptionsToReview = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        // Re-render admin panel
-                        if (document.getElementById('admin-panel').classList.contains('hidden') === false) {
-                            renderAdminPanel();
-                        }
-                    }, (error) => console.error("Review listener error:", error));
-                }
-            });
-        }
-
-
-        // --- IMGBB UPLOAD UTILITY ---
-
-        async function uploadToImgBB(file) {
-            const formData = new FormData();
-            formData.append("image", file);
+        /**
+         * The main render function that determines which content to display.
+         */
+        const renderApp = async () => {
+            const appContainer = document.getElementById('app-container');
             
-            const spinner = document.getElementById('subscription-spinner');
-            const btnText = document.getElementById('subscription-button-text');
-            
-            spinner.classList.remove('hidden');
-            btnText.classList.add('hidden');
+            // Render Header first
+            appContainer.innerHTML = renderHeader();
+            const mainContent = document.createElement('main');
+            mainContent.id = 'main-content-area';
+            mainContent.className = 'mt-6';
+            appContainer.appendChild(mainContent);
 
+            if (!appState.isAuthReady) {
+                mainContent.innerHTML = renderLoadingScreen('Initializing application...');
+                return;
+            }
+
+            const { currentPage, userProfile } = appState;
+            
+            // Wait for user profile to be ready before rendering main views
+            if (!userProfile) {
+                // Should only happen if user is authenticated but profile hasn't loaded (brief moment)
+                mainContent.innerHTML = renderLoadingScreen('Awaiting user profile...');
+                return;
+            }
+
+            switch (currentPage) {
+                case 'home':
+                case 'dashboard':
+                    mainContent.innerHTML = await renderDashboard();
+                    break;
+                case 'catalog':
+                    mainContent.innerHTML = await renderCourseCatalog();
+                    break;
+                case 'course-details':
+                    mainContent.innerHTML = await renderCourseDetails(appState.pageParams.courseId);
+                    break;
+                case 'add-course':
+                    if (userProfile.isTutor) {
+                        mainContent.innerHTML = renderAddCourseForm();
+                    } else {
+                        window.navigateTo('dashboard');
+                        showToast('Access Denied.', 'error');
+                    }
+                    break;
+                case 'manage-subscriptions':
+                    if (userProfile.isTutor) {
+                        mainContent.innerHTML = await renderSubscriptionManagement();
+                    } else {
+                        window.navigateTo('dashboard');
+                        showToast('Access Denied.', 'error');
+                    }
+                    break;
+                default:
+                    mainContent.innerHTML = renderNotFound();
+            }
+            
+            // Re-render icons after content is loaded
+            lucide.createIcons();
+        };
+
+        // ====================================================================
+        // 4. AUTHENTICATION & FIREBASE INITIALIZATION
+        // ====================================================================
+
+        /**
+         * Initializes Firebase, sets up authentication, and starts listeners.
+         */
+        const initializeServices = async () => {
             try {
-                const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
-                    method: 'POST',
-                    body: formData,
+                const app = initializeApp(firebaseConfig);
+                appState.db = getFirestore(app);
+                appState.auth = getAuth(app);
+                appState.storage = getStorage(app);
+
+                // Initialize dark mode based on saved preference
+                document.documentElement.classList.toggle('dark', appState.isDarkMode);
+
+                // Log into the system using the initial token or anonymously
+                const authPromise = initialAuthToken 
+                    ? signInWithCustomToken(appState.auth, initialAuthToken) 
+                    : signInAnonymously(appState.auth);
+                await authPromise;
+                
+                // Setup Auth listener to manage user state
+                onAuthStateChanged(appState.auth, async (user) => {
+                    if (user) {
+                        appState.userId = user.uid;
+                        await setupFirestoreListeners(user.uid);
+                    } else {
+                        // User signed out or anonymous session expired
+                        appState.userId = null;
+                        appState.userProfile = null;
+                        appState.isAuthReady = true;
+                        window.navigateTo('home');
+                    }
+                    appState.isAuthReady = true;
+                    renderApp(); // Rerender after auth status is confirmed
                 });
-                const result = await response.json();
-                
-                if (result.success) {
-                    showToast('Payment proof uploaded successfully.', 'success');
-                    return result.data.url;
-                } else {
-                    showToast(`Image upload failed: ${result.error?.message || 'Unknown error'}`, 'error');
-                    return null;
-                }
             } catch (error) {
-                console.error("IMGBB API Error:", error);
-                showToast('Image upload failed due to network error.', 'error');
-                return null;
-            } finally {
-                spinner.classList.add('hidden');
-                btnText.classList.remove('hidden');
+                console.error("Error initializing Firebase/Auth:", error);
+                window.showToast("Could not initialize the app. Check console.", 'error');
+                appState.isAuthReady = true;
+                renderApp();
             }
-        }
-        
-        // --- STUDENT PATH FUNCTIONS ---
+        };
 
-        function renderTutorsList() {
-            const listContainer = document.getElementById('tutors-list-container');
-            const searchInput = document.getElementById('tutor-search');
-            const searchTerm = searchInput.value.toLowerCase();
-            
-            // Filter to only verified Tutors (excluding Super Admin/Tutors who haven't completed verification)
-            const verifiedTutors = allTutors.filter(tutor => 
-                (tutor.role === 'tutor' && tutor.tutorStatus === 'verified') || tutor.role === 'super_admin'
-            ).filter(tutor => 
-                tutor.displayName.toLowerCase().includes(searchTerm) || tutor.bio.toLowerCase().includes(searchTerm)
-            );
+        /**
+         * Sets up real-time listeners for the authenticated user's data.
+         * @param {string} userId 
+         */
+        const setupFirestoreListeners = async (userId) => {
+            const { db, dataCache } = appState;
 
-            if (!verifiedTutors.length) {
-                listContainer.innerHTML = `<p class="text-center text-gray-500 mt-8">No tutors found or available.</p>`;
-                return;
-            }
-
-            listContainer.innerHTML = verifiedTutors.map(tutor => {
-                const tutorCourses = allCourses.filter(c => c.tutorId === tutor.id);
-                return `
-                    <div class="bg-white p-6 rounded-xl shadow-lg hover:shadow-xl transition duration-300 border border-indigo-100">
-                        <div class="flex items-center space-x-4">
-                            <img class="w-16 h-16 rounded-full object-cover border-4 border-indigo-200" src="https://placehold.co/100x100/4f46e5/ffffff?text=${tutor.displayName.charAt(0)}" onerror="this.src='https://placehold.co/100x100/4f46e5/ffffff?text=${tutor.displayName.charAt(0)}'">
-                            <div>
-                                <h3 class="text-xl font-bold text-gray-800">${tutor.displayName}</h3>
-                                <p class="text-indigo-600">${tutor.role === 'super_admin' ? 'Super Admin' : 'Verified Tutor'}</p>
-                            </div>
-                        </div>
-                        <p class="text-gray-600 mt-4 h-12 overflow-hidden">${tutor.bio || 'This tutor has not yet provided a bio.'}</p>
-                        <div class="mt-4 flex justify-between items-center">
-                            <span class="text-sm font-medium text-gray-500">${tutorCourses.length} Courses Offered</span>
-                            <button onclick="navigateTo('course-view', {courseId: '${tutorCourses[0]?.id}'})"
-                                class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md">
-                                View Courses
-                            </button>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        async function fetchCourseLessons(courseId) {
-            const lessonsRef = collection(window.firebase.db, `courses/${courseId}/lessons`);
-            const q = query(lessonsRef);
-            const snapshot = await firestore.getDocs(q);
-            // Sort lessons by order field client-side
-            return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => a.order - b.order);
-        }
-
-        async function renderCoursePage(courseId) {
-            const container = document.getElementById('course-content');
-            const courseView = document.getElementById('course-view');
-            courseView.dataset.courseId = courseId;
-            
-            const course = allCourses.find(c => c.id === courseId);
-            if (!course) {
-                container.innerHTML = `<div class="text-center p-12 text-gray-600">Course not found.</div>`;
-                return;
-            }
-
-            const tutor = allTutors.find(t => t.id === course.tutorId);
-            const subscription = mySubscriptions.find(s => s.courseId === courseId);
-            const isTutorOrAdmin = userProfile && ['tutor', 'assistant', 'super_admin'].includes(userProfile.role) && userProfile.id === course.tutorId;
-            
-            const hasAccess = isTutorOrAdmin || (subscription && (subscription.status === 'subscribed' || subscription.status === 'underReview'));
-
-            // Show subscription button or status message
-            let accessMessageHtml = '';
-            if (isTutorOrAdmin) {
-                 accessMessageHtml = `<p class="text-green-600 font-semibold mt-4">You are the Course Owner (Tutor/Admin). Full access granted.</p>`;
-            } else if (subscription?.status === 'subscribed') {
-                accessMessageHtml = `<p class="text-green-600 font-semibold mt-4">Subscription Status: Active</p>`;
-            } else if (subscription?.status === 'underReview') {
-                accessMessageHtml = `<p class="text-orange-600 font-semibold mt-4">Subscription Status: Under Review. Lessons are visible, but final access depends on approval.</p>`;
-            } else if (subscription?.status === 'canceled') {
-                accessMessageHtml = `
-                    <p class="text-red-600 font-semibold mt-4">Subscription Canceled.</p>
-                    <p class="text-sm text-red-500 italic">Reviewer Remarks: ${subscription.reviewerRemark || 'No specific remark provided.'}</p>
-                    <button onclick="showModal('subscription-modal')" class="mt-4 px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition duration-150 shadow-lg">
-                        Re-Subscribe Now
-                    </button>
-                `;
-            } else {
-                // Not subscribed
-                accessMessageHtml = `
-                    <p class="text-gray-600 font-medium mt-4">You are not currently subscribed to this course.</p>
-                    <button onclick="showModal('subscription-modal')" class="mt-4 px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition duration-150 shadow-lg">
-                        Subscribe Now for $${course.price}
-                    </button>
-                `;
-            }
-
-            container.innerHTML = `
-                <div class="bg-white p-8 rounded-2xl shadow-xl max-w-4xl mx-auto mb-8 border-t-4 border-indigo-600">
-                    <h1 class="text-4xl font-extrabold text-gray-900">${course.title}</h1>
-                    <p class="text-lg text-gray-600 mt-2">Tutor: <span class="font-semibold text-indigo-600">${tutor?.displayName || 'N/A'}</span></p>
-                    <p class="mt-4 text-gray-700">${course.description}</p>
-                    ${accessMessageHtml}
-                </div>
-                <div id="lessons-container" class="max-w-4xl mx-auto">
-                    <h2 class="text-3xl font-bold text-gray-800 mb-6">Course Lessons</h2>
-                    <div id="lesson-list-content">
-                        ${hasAccess ? 'Loading lessons...' : '<div class="text-center p-12 text-gray-500 bg-white rounded-xl shadow-lg">Subscribe or wait for review to view lesson content.</div>'}
-                    </div>
-                </div>
-            `;
-            
-            if (hasAccess) {
-                renderLessons(courseId);
-            }
-
-            // Set up subscription modal
-            const subModalContainer = document.getElementById('subscription-modal-content');
-            subModalContainer.innerHTML = `
-                <h3 class="text-2xl font-bold mb-4 text-gray-900">Subscribe to ${course.title}</h3>
-                <p class="mb-4 text-gray-700">Price: <span class="font-bold text-indigo-600 text-xl">$${course.price}</span></p>
-                
-                <form id="subscription-form" onsubmit="event.preventDefault(); submitSubscription('${courseId}', '${course.tutorId}', ${course.price});">
-                    <div class="space-y-4">
-                        <label class="block">
-                            <span class="text-gray-700">Payment ID / Transaction Reference</span>
-                            <input id="payment-id" type="text" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-3" placeholder="e.g., ABC-12345-XYZ">
-                        </label>
-                        <label class="block">
-                            <span class="text-gray-700">Subscription Duration</span>
-                            <select id="duration" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-3">
-                                <option value="" disabled selected>Select Duration</option>
-                                <option value="1_month">1 Month</option>
-                                <option value="2_months">2 Months</option>
-                                <option value="6_months">6 Months</option>
-                                <option value="1_year">1 Year</option>
-                            </select>
-                        </label>
-                        <label class="block">
-                            <span class="text-gray-700">Upload Payment Verification (Image)</span>
-                            <input id="payment-proof" type="file" accept="image/*" required class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
-                        </label>
-                    </div>
-                    <button id="subscription-button" type="submit" class="w-full mt-6 flex justify-center items-center px-4 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition duration-150 shadow-lg disabled:opacity-50" disabled>
-                        <span id="subscription-spinner" class="hidden animate-spin h-5 w-5 mr-3 border-4 border-white border-t-transparent rounded-full"></span>
-                        <span id="subscription-button-text">Submit Subscription Request</span>
-                    </button>
-                    <div class="text-xs text-gray-500 mt-2">Note: Please fill all fields and upload the image to enable submission.</div>
-                </form>
-            `;
-            
-            // Enable button only when file is selected
-            document.getElementById('payment-proof').addEventListener('change', (e) => {
-                const button = document.getElementById('subscription-button');
-                if (e.target.files.length > 0) {
-                    button.disabled = false;
+            // 1. User Profile Listener
+            const userDocRef = doc(db, PUBLIC_COLLECTION, 'users', userId);
+            onSnapshot(userDocRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const profile = docSnap.data();
+                    appState.userProfile = { id: userId, ...profile };
+                    dataCache.userProfiles.set(userId, appState.userProfile); // Cache self
+                    renderApp(); // Rerender when profile updates (e.g., tutor status changes)
                 } else {
-                    button.disabled = true;
+                    // Create default profile if it doesn't exist (First time login)
+                    const newProfile = { 
+                        displayName: appState.auth.currentUser?.email || `User ${userId.substring(0, 5)}`,
+                        email: appState.auth.currentUser?.email || null,
+                        isTutor: false,
+                        joinedAt: serverTimestamp()
+                    };
+                    setDoc(userDocRef, newProfile).then(() => {
+                        appState.userProfile = { id: userId, ...newProfile };
+                        dataCache.userProfiles.set(userId, appState.userProfile);
+                        showToast('Welcome! Your profile has been created.', 'info');
+                        renderApp();
+                    }).catch(e => console.error("Error creating profile:", e));
                 }
             });
 
-        }
+            // 2. Courses Listener (Public data)
+            const coursesQuery = query(collection(db, PUBLIC_COLLECTION, 'courses'));
+            onSnapshot(coursesQuery, (snapshot) => {
+                appState.dataCache.courses = snapshotToData(snapshot);
+                renderApp(); // Rerender to update dashboard/catalog
+            });
 
-        async function renderLessons(courseId) {
-            const lessons = await fetchCourseLessons(courseId);
-            const lessonListContent = document.getElementById('lesson-list-content');
-            
-            if (!lessons.length) {
-                lessonListContent.innerHTML = `<p class="text-center text-gray-500 p-8 bg-white rounded-xl shadow-lg">No lessons have been added to this course yet.</p>`;
+            // 3. Subscriptions Listener (Tutor-only public data)
+            if (appState.userProfile?.isTutor) {
+                const subscriptionsQuery = query(collection(db, PUBLIC_COLLECTION, 'subscriptions'));
+                onSnapshot(subscriptionsQuery, (snapshot) => {
+                    appState.dataCache.subscriptions = snapshotToData(snapshot);
+                    renderApp(); // Rerender subscription management page
+                });
+            }
+
+            // 4. Progress Listener (Private data)
+            const progressQuery = query(collection(db, USERS_COLLECTION, userId, 'progress'));
+            onSnapshot(progressQuery, (snapshot) => {
+                appState.dataCache.progress = new Set(snapshotToData(snapshot).map(p => p.id));
+                renderApp(); // Rerender course details to show progress
+            });
+        };
+
+        // ====================================================================
+        // 5. DATA OPERATIONS (ACTIONS)
+        // ====================================================================
+
+        /**
+         * Fetches a single user's profile, using cache if available.
+         * @param {string} userId - The ID of the user.
+         * @returns {Promise<object>} The user profile object.
+         */
+        const fetchUserProfile = async (userId) => {
+            const { db, dataCache } = appState;
+            if (dataCache.userProfiles.has(userId)) {
+                return dataCache.userProfiles.get(userId);
+            }
+
+            try {
+                const userDocRef = doc(db, PUBLIC_COLLECTION, 'users', userId);
+                const docSnap = await getDoc(userDocRef);
+                if (docSnap.exists()) {
+                    const profile = { id: docSnap.id, ...docSnap.data() };
+                    dataCache.userProfiles.set(userId, profile);
+                    return profile;
+                }
+            } catch (error) {
+                console.error("Error fetching user profile:", error);
+            }
+            return { displayName: 'Unknown User', isTutor: false };
+        };
+
+
+        /**
+         * Handles the course submission (for Tutors).
+         */
+        window.handleCourseSubmission = async (event) => {
+            event.preventDefault();
+            const { db, userProfile } = appState;
+
+            if (!userProfile || !userProfile.isTutor) {
+                showToast('Permission denied to add course.', 'error');
                 return;
             }
 
-            lessonListContent.innerHTML = lessons.map((lesson, index) => {
-                const isFinished = myProgress.some(p => p.lessonId === lesson.id && p.finished);
-                const finishedBadge = isFinished ? `<span class="ml-3 text-xs font-semibold px-2 py-1 rounded-full bg-green-100 text-green-700">COMPLETED</span>` : '';
-                const markButton = isFinished 
-                    ? `<button class="text-sm font-medium text-gray-500 cursor-not-allowed" disabled>Finished</button>`
-                    : `<button onclick="markLessonAsDone('${lesson.id}', '${courseId}')" class="text-sm font-medium text-indigo-600 hover:text-indigo-800 transition duration-150">Mark Finished</button>`;
+            const form = event.target;
+            const courseData = {
+                title: form.title.value,
+                description: form.description.value,
+                price: parseFloat(form.price.value) || 0,
+                duration: form.duration.value,
+                tutorId: userProfile.id,
+                tutorName: userProfile.displayName,
+                lessons: (form.lessons.value || '').split('\n').map(l => l.trim()).filter(l => l),
+                createdAt: serverTimestamp()
+            };
 
-                return `
-                    <details class="bg-white rounded-xl shadow-lg mb-4 overflow-hidden border border-gray-100 group">
-                        <summary class="flex justify-between items-center p-5 cursor-pointer list-none bg-indigo-50 hover:bg-indigo-100 transition duration-150">
-                            <span class="text-lg font-semibold text-gray-800">
-                                Lesson ${index + 1}: ${lesson.title}
-                                ${finishedBadge}
-                            </span>
-                            <div class="flex items-center space-x-4">
-                                ${markButton}
-                                <svg class="w-5 h-5 text-indigo-600 transform group-open:rotate-180 transition duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                            </div>
-                        </summary>
-                        <div class="p-6 border-t border-gray-200 space-y-8">
-                            
-                            <!-- Part 1: YouTube Video -->
-                            <details class="bg-gray-50 p-4 rounded-lg">
-                                <summary class="font-bold text-lg text-indigo-700 cursor-pointer list-none">1. Video Lecture</summary>
-                                <div class="mt-4 relative w-full aspect-video protected-video-wrapper" oncontextmenu="return false;" onkeydown="if(event.keyCode == 123) {event.preventDefault(); return false;}">
-                                    <!-- Simple iframe wrapper for protection -->
-                                    <iframe 
-                                        class="absolute inset-0 w-full h-full rounded-lg shadow-xl" 
-                                        src="${lesson.youtubeUrl.replace("watch?v=", "embed/")}" 
-                                        frameborder="0" 
-                                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-                                        allowfullscreen
-                                    ></iframe>
-                                </div>
-                            </details>
+            const button = form.querySelector('button[type="submit"]');
+            const originalText = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '<span class="animate-spin mr-2">⚙️</span> Adding...';
 
-                            <!-- Part 2: Learning Materials -->
-                            <details class="bg-gray-50 p-4 rounded-lg">
-                                <summary class="font-bold text-lg text-indigo-700 cursor-pointer list-none">2. Learning Materials (PDF/PPT Links)</summary>
-                                <p class="mt-4 text-gray-600">Download and review supporting documents:</p>
-                                <a href="${lesson.materialsUrl}" target="_blank" class="mt-2 inline-flex items-center text-sm font-medium text-green-600 hover:text-green-700 transition duration-150">
-                                    <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l3-3m-3 3l-3-3m-10 0a9 9 0 1118 0v2a9 9 0 01-18 0z"></path></svg>
-                                    Access Learning Document
-                                </a>
-                            </details>
+            try {
+                await addDoc(collection(db, PUBLIC_COLLECTION, 'courses'), courseData);
+                showToast('Course added successfully!', 'success');
+                window.navigateTo('catalog');
+            } catch (error) {
+                console.error('Error adding course:', error);
+                showToast('Failed to add course. See console.', 'error');
+            } finally {
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
+        };
 
-                            <!-- Part 3: Quizzes (Embedded Google Form) -->
-                            <details class="bg-gray-50 p-4 rounded-lg">
-                                <summary class="font-bold text-lg text-indigo-700 cursor-pointer list-none">3. Quiz</summary>
-                                <div class="mt-4 w-full h-96">
-                                    <iframe class="w-full h-full rounded-lg shadow-md" src="${lesson.quizUrl}" frameborder="0" marginheight="0" marginwidth="0">Loading Quiz...</iframe>
-                                </div>
-                            </details>
+        /**
+         * Handles the subscription request submission.
+         */
+        window.handleSubscriptionRequest = async (event) => {
+            event.preventDefault();
+            const { db, storage, userProfile } = appState;
 
-                            <!-- Part 4: Tutor Remarks -->
-                            <details class="bg-gray-50 p-4 rounded-lg">
-                                <summary class="font-bold text-lg text-indigo-700 cursor-pointer list-none">4. Tutor Remarks</summary>
-                                <div class="mt-4 p-4 bg-white rounded-lg border border-gray-200">
-                                    <p class="text-gray-700 whitespace-pre-wrap">${lesson.remarks || 'No specific remarks from the tutor for this lesson.'}</p>
-                                </div>
-                            </details>
-
-                        </div>
-                    </details>
-                `;
-            }).join('');
-        }
-
-        async function submitSubscription(courseId, tutorId, price) {
-            const form = document.getElementById('subscription-form');
-            const paymentId = form.querySelector('#payment-id').value.trim();
-            const duration = form.querySelector('#duration').value;
-            const fileInput = form.querySelector('#payment-proof');
-            const file = fileInput.files[0];
-            const button = form.querySelector('#subscription-button');
-            const btnText = document.getElementById('subscription-button-text');
-            const spinner = document.getElementById('subscription-spinner');
-
-            if (!paymentId || !duration || !file) {
-                showToast('Please fill all required fields.', 'error');
+            if (!userProfile) {
+                showToast('Please sign in to subscribe.', 'error');
                 return;
             }
-            
-            // Disable button
+
+            const form = event.target;
+            const courseId = form.dataset.courseId;
+            const tutorId = form.dataset.tutorId;
+            const price = parseFloat(form.dataset.price);
+            const duration = form.dataset.duration;
+            const paymentId = form.paymentId.value;
+            const paymentProofFile = form.paymentProof.files[0];
+
+            if (!paymentProofFile) {
+                showToast('Please upload a payment proof image.', 'error');
+                return;
+            }
+
+            const button = form.querySelector('button[type="submit"]');
+            const btnText = button.querySelector('#btn-text');
+            const spinner = button.querySelector('#spinner');
+
+            btnText.classList.add('hidden');
+            spinner.classList.remove('hidden');
             button.disabled = true;
 
-            const paymentProofUrl = await uploadToImgBB(file);
+            try {
+                // 1. Upload payment proof image
+                const storageRef = ref(storage, `payment_proofs/${userProfile.id}/${courseId}_${Date.now()}`);
+                const snapshot = await uploadBytes(storageRef, paymentProofFile);
+                const paymentProofUrl = await getDownloadURL(snapshot.ref);
 
-            if (paymentProofUrl) {
+                // 2. Create subscription request document
                 const subscriptionData = {
                     userId: userProfile.id,
                     userName: userProfile.displayName,
@@ -662,810 +477,561 @@
                     subscriptionDate: serverTimestamp(),
                     reviewerRemark: ''
                 };
-                await addDoc(collection(window.firebase.db, 'subscriptions'), subscriptionData);
-                showToast('Subscription request sent successfully! Awaiting review.', 'success');
-                closeModal('subscription-modal');
-                navigateTo('dashboard');
-            } else {
-                 showToast('Subscription failed. Could not upload payment proof.', 'error');
-            }
-            
-            // Re-enable button regardless of success/failure if upload failed
-            button.disabled = false;
-        }
-        
-        async function markLessonAsDone(lessonId, courseId) {
-            if (!userProfile) return showToast('Please sign in to mark progress.', 'error');
-            
-            const progressRef = doc(window.firebase.db, `users/${userProfile.id}/progress`, lessonId);
-            await setDoc(progressRef, {
-                finished: true,
-                finishedAt: serverTimestamp(),
-                courseId: courseId
-            });
-            showToast('Lesson marked as completed!', 'success');
-            // Data listener will automatically update the UI
-        }
-
-        // --- DASHBOARD (STUDENT PROFILE) ---
-
-        function renderDashboard() {
-            if (!userProfile) return;
-            const container = document.getElementById('dashboard-content');
-            
-            const subscribedCourses = allCourses.filter(c => mySubscriptions.some(s => s.courseId === c.id));
-            
-            container.innerHTML = `
-                <div class="bg-white p-6 rounded-2xl shadow-xl border-t-4 border-indigo-600 mb-8">
-                    <h2 class="text-3xl font-bold text-gray-900 mb-2">Welcome Back, ${userProfile.displayName}!</h2>
-                    <p class="text-gray-600 mb-4">Your ID: <code class="text-xs bg-gray-100 p-1 rounded">${userProfile.id}</code></p>
-                    <button onclick="navigateTo('browse-tutors')" class="px-6 py-2 bg-green-500 text-white rounded-xl hover:bg-green-600 transition duration-150 shadow-md">Browse Tutors</button>
-                    <button onclick="navigateTo('profile-settings')" class="px-6 py-2 bg-gray-500 text-white rounded-xl hover:bg-gray-600 transition duration-150 shadow-md ml-4">Profile Settings</button>
-                </div>
+                await addDoc(collection(db, PUBLIC_COLLECTION, 'subscriptions'), subscriptionData);
                 
-                <h3 class="text-2xl font-bold text-gray-800 mb-4">My Subscribed Courses (${subscribedCourses.length})</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="subscribed-courses-list">
-                    ${subscribedCourses.length ? subscribedCourses.map(course => {
-                        const sub = mySubscriptions.find(s => s.courseId === course.id);
-                        const tutor = allTutors.find(t => t.id === course.tutorId);
-                        
-                        // Calculate Progress
-                        const totalLessonsPromise = fetchCourseLessons(course.id);
-                        
-                        // Render placeholder while total lessons are being fetched
-                        return `
-                            <div class="bg-white p-6 rounded-xl shadow-lg border-l-4 border-indigo-400 flex flex-col justify-between" id="course-card-${course.id}">
-                                <div>
-                                    <h4 class="text-xl font-bold text-gray-800">${course.title}</h4>
-                                    <p class="text-sm text-indigo-600 mb-3">Tutor: ${tutor?.displayName || 'N/A'}</p>
-                                    <div class="flex items-center text-sm mb-4">
-                                        <span class="font-medium">Status: </span>
-                                        ${sub.status === 'subscribed' ? '<span class="ml-2 px-3 py-1 bg-green-100 text-green-700 rounded-full font-semibold">Active</span>' : 
-                                          sub.status === 'underReview' ? '<span class="ml-2 px-3 py-1 bg-orange-100 text-orange-700 rounded-full font-semibold">Under Review</span>' :
-                                          '<span class="ml-2 px-3 py-1 bg-red-100 text-red-700 rounded-full font-semibold">Canceled</span>'}
-                                    </div>
-                                    ${sub.status === 'canceled' && sub.reviewerRemark ? `<p class="text-xs text-red-500 italic mt-1">Remark: ${sub.reviewerRemark}</p>` : ''}
-                                    <p class="text-gray-500 text-sm">Progress: <span id="progress-text-${course.id}">Loading...</span></p>
-                                    <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
-                                        <div id="progress-bar-${course.id}" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
-                                    </div>
-                                </div>
-                                <button onclick="navigateTo('course-view', {courseId: '${course.id}'})" class="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md">
-                                    Continue Learning
-                                </button>
-                            </div>
-                            <script>
-                                (async () => {
-                                    const courseId = '${course.id}';
-                                    const lessons = await fetchCourseLessons(courseId);
-                                    const totalLessons = lessons.length;
-                                    const finishedLessons = myProgress.filter(p => p.courseId === courseId && p.finished).length;
-                                    
-                                    const percentage = totalLessons > 0 ? Math.round((finishedLessons / totalLessons) * 100) : 0;
-                                    
-                                    document.getElementById('progress-text-' + courseId).textContent = \`\${finishedLessons} / \${totalLessons}\`;
-                                    document.getElementById('progress-bar-' + courseId).style.width = \`\${percentage}%\`;
-                                })();
-                            </script>
-                        `;
-                    }).join('') : '<p class="text-gray-500 p-8 bg-white rounded-xl shadow-lg col-span-full">You have not subscribed to any courses yet.</p>'}
-                </div>
-            `;
-        }
-        
-        function renderProfileSettings() {
-            const container = document.getElementById('profile-settings-content');
-            if (!userProfile) return;
+                showToast('Subscription request sent successfully!', 'success');
+                // Close modal and navigate
+                closeModal();
+                window.navigateTo('dashboard');
+            } catch (error) {
+                console.error('Subscription error:', error);
+                showToast('Failed to send subscription request. Try again.', 'error');
+            } finally {
+                btnText.classList.remove('hidden');
+                spinner.classList.add('hidden');
+                button.disabled = false;
+            }
+        };
 
-            container.innerHTML = `
-                <div class="bg-white p-8 rounded-2xl shadow-xl max-w-2xl mx-auto border-t-4 border-indigo-600">
-                    <h2 class="text-3xl font-bold text-gray-900 mb-6">Profile Settings</h2>
-                    <form onsubmit="event.preventDefault(); updateProfile(event);">
-                        <div class="space-y-4">
-                            <div>
-                                <label for="profile-name" class="block text-sm font-medium text-gray-700">Display Name</label>
-                                <input type="text" id="profile-name" value="${userProfile.displayName || ''}" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-3">
-                            </div>
-                            <div>
-                                <label for="profile-email" class="block text-sm font-medium text-gray-700">Email (Read-only)</label>
-                                <input type="email" id="profile-email" value="${userProfile.email || 'N/A'}" disabled class="mt-1 block w-full rounded-lg border-gray-300 bg-gray-50 p-3">
-                            </div>
-                            <div>
-                                <label for="profile-role" class="block text-sm font-medium text-gray-700">Role (Read-only)</label>
-                                <input type="text" id="profile-role" value="${userProfile.role || 'N/A'}" disabled class="mt-1 block w-full rounded-lg border-gray-300 bg-gray-50 p-3">
-                                ${userProfile.role === 'tutor' ? `<p class="mt-1 text-sm text-gray-500">Tutor Status: <span class="font-semibold text-orange-600">${userProfile.tutorStatus}</span></p>` : ''}
-                            </div>
-                            <div>
-                                <label for="profile-bio" class="block text-sm font-medium text-gray-700">Bio (Max 250 chars)</label>
-                                <textarea id="profile-bio" rows="4" maxlength="250" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-3">${userProfile.bio || ''}</textarea>
-                            </div>
-                        </div>
-                        <button type="submit" class="mt-6 w-full px-4 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition duration-150 shadow-lg">Save Profile Updates</button>
-                    </form>
-                </div>
-            `;
-        }
-        
-        async function updateProfile(event) {
-            const form = event.target;
-            const displayName = form.querySelector('#profile-name').value;
-            const bio = form.querySelector('#profile-bio').value;
+        /**
+         * Marks a lesson as done for the current user.
+         * @param {string} lessonId - The index (0, 1, 2...) of the lesson.
+         * @param {string} courseId - The ID of the course.
+         */
+        window.markLessonAsDone = async (lessonId, courseId) => {
+            const { db, userId } = appState;
+            if (!userId) {
+                showToast('You must be signed in.', 'error');
+                return;
+            }
+
+            const lessonDocId = `${courseId}-${lessonId}`;
+            const progressRef = doc(db, USERS_COLLECTION, userId, 'progress', lessonDocId);
 
             try {
-                const userRef = doc(window.firebase.db, 'users', userProfile.id);
-                await updateDoc(userRef, {
-                    displayName,
-                    bio,
-                    lastUpdated: serverTimestamp()
+                await setDoc(progressRef, {
+                    finished: true,
+                    finishedAt: serverTimestamp(),
+                    courseId: courseId,
+                    lessonIndex: parseInt(lessonId)
                 });
-                
-                // Update local profile
-                userProfile.displayName = displayName;
-                userProfile.bio = bio;
-
-                showToast('Profile updated successfully!', 'success');
-                updateNavbar(); // Update display name in navbar
+                showToast('Lesson marked as completed!', 'success');
+                // The onSnapshot listener will handle the re-render
             } catch (error) {
-                console.error("Error updating profile:", error);
-                showToast('Failed to update profile. Try again.', 'error');
+                console.error("Error marking lesson done:", error);
+                showToast('Failed to update progress.', 'error');
             }
-        }
+        };
 
-        // --- TUTOR / ADMIN PATH FUNCTIONS ---
-        
-        function renderAdminPanel() {
-            if (!userProfile || !['tutor', 'assistant', 'super_admin'].includes(userProfile.role)) return;
+        /**
+         * Approves or rejects a subscription request (for Tutors).
+         * @param {string} subscriptionId 
+         * @param {boolean} approve 
+         */
+        window.updateSubscriptionStatus = async (subscriptionId, approve) => {
+            const { db, userProfile } = appState;
+            if (!userProfile || !userProfile.isTutor) return showToast('Permission denied.', 'error');
 
-            const container = document.getElementById('admin-panel-content');
+            const status = approve ? 'approved' : 'rejected';
+            const remark = prompt(`Enter a brief remark for the ${status} status:`);
+            if (remark === null) return; // Cancelled
+
+            const subRef = doc(db, PUBLIC_COLLECTION, 'subscriptions', subscriptionId);
             
-            const isSuperAdmin = userProfile.role === 'super_admin';
-            const myCourses = isSuperAdmin 
-                ? allCourses
-                : allCourses.filter(c => c.tutorId === userProfile.id);
-            
-            const reviewSubs = isSuperAdmin
-                ? subscriptionsToReview.filter(s => s.status === 'underReview')
-                : subscriptionsToReview.filter(s => s.tutorId === userProfile.id && s.status === 'underReview');
-            
-            const allSubs = isSuperAdmin
-                ? subscriptionsToReview
-                : subscriptionsToReview.filter(s => s.tutorId === userProfile.id);
-            
-            const tutorStatusHtml = userProfile.role === 'tutor' 
-                ? `<p class="mt-2 text-lg font-semibold ${userProfile.tutorStatus === 'verified' ? 'text-green-600' : userProfile.tutorStatus === 'underReview' ? 'text-orange-600' : 'text-red-600'}">Status: ${userProfile.tutorStatus.toUpperCase()}</p>`
-                : '';
+            try {
+                await updateDoc(subRef, {
+                    status: status,
+                    reviewerRemark: remark,
+                    reviewDate: serverTimestamp()
+                });
+                showToast(`Subscription ${status} successfully!`, 'success');
+            } catch (error) {
+                console.error(`Error updating subscription:`, error);
+                showToast(`Failed to update subscription status.`, 'error');
+            }
+        };
 
 
-            container.innerHTML = `
-                <div class="bg-white p-6 rounded-2xl shadow-xl border-t-4 border-indigo-600 mb-8">
-                    <h2 class="text-3xl font-bold text-gray-900 mb-2">Admin Panel</h2>
-                    <p class="text-xl text-gray-600">Role: ${userProfile.role.toUpperCase()}</p>
-                    ${tutorStatusHtml}
+        // ====================================================================
+        // 6. UI COMPONENT RENDERING (HTML TEMPLATES)
+        // ====================================================================
+
+        const renderLoadingScreen = (message) => `
+            <div class="flex items-center justify-center p-16 text-gray-500 dark:text-gray-400">
+                <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>${message}</span>
+            </div>
+        `;
+
+        const renderNotFound = () => `
+            <div class="text-center py-20">
+                <h2 class="text-4xl font-bold text-red-600">404 - Page Not Found</h2>
+                <p class="mt-4 text-lg dark:text-gray-300">The requested page does not exist.</p>
+                <button onclick="navigateTo('dashboard')" class="mt-6 bg-indigo-600 text-white px-6 py-2 rounded-lg shadow hover:bg-indigo-700 transition">Go to Dashboard</button>
+            </div>
+        `;
+
+        /**
+         * Renders the persistent application header.
+         */
+        const renderHeader = () => {
+            const { userProfile, isDarkMode } = appState;
+            const userName = userProfile ? userProfile.displayName : 'Guest';
+            const profileSnippet = userProfile ? `
+                <div class="flex items-center space-x-4">
+                    <span class="text-sm font-medium hidden sm:inline truncate max-w-[100px]">${userName}</span>
+                    <div class="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white font-bold text-sm">${userName[0]}</div>
                 </div>
-                
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <!-- Column 1: Subscriptions Review -->
-                    <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-lg border-l-4 border-orange-500 h-full">
-                        <h3 class="text-2xl font-bold text-gray-800 mb-4 flex justify-between items-center">
-                            Pending Subscriptions (${reviewSubs.length})
-                        </h3>
-                        <div id="review-list" class="space-y-4 max-h-[700px] overflow-y-auto pr-2">
-                            ${reviewSubs.length ? reviewSubs.map(sub => `
-                                <div class="p-4 border border-orange-200 rounded-lg bg-orange-50">
-                                    <p class="font-semibold text-gray-800">${sub.userName} (${sub.userEmail})</p>
-                                    <p class="text-sm text-gray-600">Course: ${allCourses.find(c => c.id === sub.courseId)?.title || 'N/A'}</p>
-                                    <p class="text-xs text-gray-500">Payment ID: ${sub.paymentId}</p>
-                                    <a href="${sub.paymentProofUrl}" target="_blank" class="text-indigo-600 text-sm hover:underline">View Proof</a>
-                                    <div class="mt-3 flex space-x-2">
-                                        <button onclick="reviewSubscription('${sub.id}', 'subscribed', '')" class="text-xs px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600">Approve</button>
-                                        <button onclick="openModal('review-remark-modal'); document.getElementById('review-sub-id').value='${sub.id}';" class="text-xs px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600">Cancel</button>
-                                    </div>
-                                </div>
-                            `).join('') : '<p class="text-gray-500">No subscriptions pending review.</p>'}
-                        </div>
+            ` : `
+                <span class="text-sm font-medium">Please wait...</span>
+            `;
+
+            return `
+                <header class="card p-4 rounded-xl shadow-lg flex justify-between items-center sticky top-0 z-40 mb-4">
+                    <div class="flex items-center space-x-6">
+                        <h1 onclick="navigateTo('dashboard')" class="text-xl font-extrabold text-indigo-600 cursor-pointer hover:text-indigo-800 transition">
+                            <span class="hidden sm:inline">IntelliLearn</span>
+                            <span class="sm:hidden">ILP</span>
+                        </h1>
+                        <nav class="hidden md:flex space-x-4">
+                            <button onclick="navigateTo('dashboard')" class="text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition">Dashboard</button>
+                            <button onclick="navigateTo('catalog')" class="text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition">Catalog</button>
+                            ${userProfile?.isTutor ? `
+                                <button onclick="navigateTo('add-course')" class="text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition">Add Course</button>
+                                <button onclick="navigateTo('manage-subscriptions')" class="text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition">Manage Subscriptions</button>
+                            ` : ''}
+                        </nav>
+                    </div>
+                    <div class="flex items-center space-x-3">
+                        ${profileSnippet}
+                        <button onclick="toggleDarkMode()" class="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition" aria-label="Toggle Dark Mode">
+                            ${isDarkMode ? '<i data-lucide="sun" class="w-5 h-5"></i>' : '<i data-lucide="moon" class="w-5 h-5"></i>'}
+                        </button>
+                        <button onclick="window.signOutUser()" class="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition" aria-label="Sign Out">
+                            <i data-lucide="log-out" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                </header>
+            `;
+        };
+
+        /**
+         * Renders the main user dashboard screen.
+         */
+        const renderDashboard = async () => {
+            const { userProfile, dataCache } = appState;
+            const courses = dataCache.courses;
+
+            // Simple logic to determine enrolled courses (by checking if any subscription is approved/underReview)
+            const subscriptions = dataCache.subscriptions;
+            const mySubscriptions = subscriptions.filter(sub => 
+                sub.userId === userProfile.id && (sub.status === 'approved' || sub.status === 'underReview')
+            );
+            
+            const enrolledCourseIds = new Set(mySubscriptions.map(sub => sub.courseId));
+            const enrolledCourses = courses.filter(c => enrolledCourseIds.has(c.id));
+            const createdCourses = courses.filter(c => c.tutorId === userProfile.id);
+
+            const renderCourseCard = (course, isEnrolled = false) => `
+                <div class="card p-5 rounded-xl shadow-lg flex flex-col justify-between hover:shadow-xl transition">
+                    <div>
+                        <h3 class="text-xl font-semibold text-indigo-600">${course.title}</h3>
+                        <p class="text-gray-500 dark:text-gray-400 text-sm mt-1 mb-3">${course.description.substring(0, 100)}${course.description.length > 100 ? '...' : ''}</p>
+                        <p class="text-sm font-medium mb-3">Tutor: ${course.tutorName || 'N/A'}</p>
+                    </div>
+                    <div class="flex justify-between items-center mt-auto pt-3 border-t border-gray-100 dark:border-gray-700">
+                        <span class="text-lg font-bold text-green-600">$${course.price.toFixed(2)}</span>
+                        <button onclick="navigateTo('course-details', { courseId: '${course.id}' })" 
+                                class="bg-indigo-500 text-white px-4 py-1.5 rounded-lg text-sm shadow hover:bg-indigo-600 transition">
+                            ${isEnrolled ? 'View Course' : 'Details'}
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            return `
+                <section class="space-y-10">
+                    <div class="p-6 rounded-xl bg-indigo-50 dark:bg-gray-800 shadow-inner">
+                        <h2 class="text-3xl font-bold text-indigo-700 dark:text-indigo-400">Welcome back, ${userProfile.displayName}!</h2>
+                        <p class="mt-2 text-indigo-600 dark:text-indigo-300">Your User ID: <span class="font-mono text-xs p-1 bg-indigo-200 dark:bg-gray-700 rounded">${userProfile.id}</span></p>
+                        ${userProfile.isTutor ? '<p class="mt-1 text-lg font-semibold text-teal-600 dark:text-teal-400">You are registered as a Tutor.</p>' : ''}
                     </div>
 
-                    <!-- Column 2: Course Management -->
-                    <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-lg border-l-4 border-indigo-500">
-                        <h3 class="text-2xl font-bold text-gray-800 mb-4 flex justify-between items-center">
-                            Course Management (${myCourses.length})
-                            <button onclick="openCourseModal()" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md">
-                                + Add Course
-                            </button>
-                        </h3>
-                        <div id="course-list" class="space-y-4">
-                            ${myCourses.length ? myCourses.map(course => {
-                                const courseSubs = allSubs.filter(s => s.courseId === course.id);
-                                const activeSubs = courseSubs.filter(s => s.status === 'subscribed').length;
-
-                                return `
-                                    <div class="p-4 border border-gray-200 rounded-lg bg-gray-50">
-                                        <div class="flex justify-between items-start">
-                                            <div>
-                                                <h4 class="text-xl font-bold text-indigo-700">${course.title}</h4>
-                                                <p class="text-sm text-gray-600">$${course.price} | Active Subs: ${activeSubs}</p>
-                                            </div>
-                                            <div class="flex space-x-2">
-                                                <button onclick="openCourseModal('${course.id}')" class="text-sm px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">Edit</button>
-                                                <button onclick="deleteCourse('${course.id}')" class="text-sm px-3 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200">Delete</button>
-                                            </div>
-                                        </div>
-                                        <div id="lessons-management-${course.id}" class="mt-4 border-t pt-4">
-                                            <h5 class="font-semibold mb-2 flex justify-between items-center">
-                                                Lessons (${'Loading...'})
-                                                <button onclick="openLessonModal('${course.id}')" class="text-xs px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600">+ Add Lesson</button>
-                                            </h5>
-                                            <ul id="lesson-list-${course.id}" class="space-y-2"></ul>
-                                        </div>
-                                    </div>
-                                    <script>renderLessonList('${course.id}')</script>
-                                `;
-                            }).join('') : '<p class="text-gray-500">No courses managed yet. Click "Add Course" to begin.</p>'}
+                    ${enrolledCourses.length > 0 ? `
+                        <div class="space-y-4">
+                            <h3 class="text-2xl font-semibold border-b pb-2 text-gray-800 dark:text-gray-200">My Enrolled Courses</h3>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                                ${enrolledCourses.map(c => renderCourseCard(c, true)).join('')}
+                            </div>
                         </div>
-                    </div>
-                    
-                    ${isSuperAdmin ? `
-                        <!-- Column 3: Super Admin Tools -->
-                        <div class="lg:col-span-3 bg-white p-6 rounded-xl shadow-lg border-l-4 border-purple-500 mt-6">
-                            <h3 class="text-2xl font-bold text-gray-800 mb-4">Super Admin Tools: Tutor Management</h3>
-                            <div id="tutor-management-list" class="space-y-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                                ${allTutors.filter(t => t.role === 'tutor').map(tutor => `
-                                    <div class="p-3 border border-purple-200 rounded-lg bg-purple-50">
-                                        <p class="font-semibold">${tutor.displayName} (${tutor.email})</p>
-                                        <p class="text-sm">Status: <span class="font-medium ${tutor.tutorStatus === 'verified' ? 'text-green-600' : 'text-red-600'}">${tutor.tutorStatus}</span></p>
-                                        <div class="mt-2 space-x-2">
-                                            <button onclick="updateTutorStatus('${tutor.id}', 'verified')" class="text-xs px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50" ${tutor.tutorStatus === 'verified' ? 'disabled' : ''}>Verify</button>
-                                            <button onclick="updateTutorStatus('${tutor.id}', 'cancelled')" class="text-xs px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50" ${tutor.tutorStatus === 'cancelled' ? 'disabled' : ''}>Cancel</button>
-                                        </div>
-                                    </div>
-                                `).join('')}
+                    ` : `
+                        <div class="text-center p-10 card rounded-xl shadow">
+                            <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300">You are not currently enrolled in any courses.</h3>
+                            <p class="mt-2 text-gray-500">Explore the <a href="#" onclick="navigateTo('catalog')" class="text-indigo-600 hover:underline">Catalog</a> to find your next lesson!</p>
+                        </div>
+                    `}
+
+                    ${userProfile.isTutor && createdCourses.length > 0 ? `
+                        <div class="space-y-4">
+                            <h3 class="text-2xl font-semibold border-b pb-2 text-gray-800 dark:text-gray-200">My Created Courses</h3>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                                ${createdCourses.map(c => renderCourseCard(c)).join('')}
                             </div>
                         </div>
                     ` : ''}
-                </div>
+                </section>
             `;
-        }
-        
-        async function updateTutorStatus(tutorId, status) {
-            try {
-                const tutorRef = doc(window.firebase.db, 'users', tutorId);
-                await updateDoc(tutorRef, { tutorStatus: status });
-                showToast(`Tutor status updated to ${status}.`, 'success');
-            } catch (error) {
-                console.error("Error updating tutor status:", error);
-                showToast('Failed to update tutor status.', 'error');
-            }
-        }
+        };
 
-        async function renderLessonList(courseId) {
-            const lessons = await fetchCourseLessons(courseId);
-            const listElement = document.getElementById(`lesson-list-${courseId}`);
-            if (!listElement) return;
+        /**
+         * Renders the course catalog screen.
+         */
+        const renderCourseCatalog = async () => {
+            const { dataCache } = appState;
+            const courses = dataCache.courses;
 
-            // Update Lesson Count in Header
-            const header = listElement.closest('div').querySelector('h5');
-            header.innerHTML = header.innerHTML.replace(/\((.*?)\)/, `(${lessons.length})`);
-
-            listElement.innerHTML = lessons.map(lesson => `
-                <li id="lesson-item-${lesson.id}" class="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
-                    <span class="text-sm font-medium text-gray-700">${lesson.title}</span>
-                    <div class="flex space-x-2">
-                        <button onclick="openLessonModal('${courseId}', '${lesson.id}')" class="text-xs px-2 py-1 bg-gray-200 rounded hover:bg-gray-300">Edit</button>
-                        <button onclick="deleteLesson('${courseId}', '${lesson.id}')" class="text-xs px-2 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200">Delete</button>
+            const renderCourseCard = (course) => `
+                <div class="card p-5 rounded-xl shadow-lg flex flex-col justify-between hover:shadow-xl transition">
+                    <div>
+                        <h3 class="text-xl font-semibold text-indigo-600">${course.title}</h3>
+                        <p class="text-gray-500 dark:text-gray-400 text-sm mt-1 mb-3">${course.description.substring(0, 100)}${course.description.length > 100 ? '...' : ''}</p>
+                        <p class="text-sm font-medium mb-3">Tutor: ${course.tutorName || 'N/A'}</p>
                     </div>
-                </li>
-            `).join('');
-            
-            // Reordering Functionality (Basic JS implementation)
-            const reorderButton = listElement.closest('div').querySelector('.flex-between button:first-child');
-            if (reorderButton && !reorderButton.onclick.toString().includes('reorderLessons')) {
-                const reorderBtnHtml = `<button onclick="reorderLessons('${courseId}')" class="text-xs px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 ml-2">Reorder</button>`;
-                header.insertAdjacentHTML('beforeend', reorderBtnHtml);
-            }
-        }
-
-        async function reorderLessons(courseId) {
-            const lessons = await fetchCourseLessons(courseId);
-            const newOrder = prompt(`Enter new order for lessons (comma-separated list of IDs, e.g., ${lessons.map(l => l.id.substring(0, 4)).join(', ')}). First ID is order 1.`);
-            if (!newOrder) return;
-
-            const lessonIds = newOrder.split(',').map(id => id.trim());
-            if (lessonIds.length !== lessons.length || new Set(lessonIds).size !== lessons.length) {
-                return showToast('Invalid input. Must provide a unique ID for every lesson.', 'error');
-            }
-            
-            try {
-                const batch = firestore.db.batch();
-                lessonIds.forEach((id, index) => {
-                    const lessonRef = doc(window.firebase.db, `courses/${courseId}/lessons`, id);
-                    batch.update(lessonRef, { order: index + 1 });
-                });
-                await batch.commit();
-                showToast('Lessons reordered successfully!', 'success');
-            } catch (error) {
-                console.error("Reorder error:", error);
-                showToast('Failed to reorder lessons.', 'error');
-            }
-        }
-
-
-        // --- COURSE / LESSON MODALS (CRUD) ---
-
-        function openCourseModal(courseId = null) {
-            const modal = document.getElementById('course-modal');
-            const title = modal.querySelector('#course-modal-title');
-            const form = modal.querySelector('#course-form');
-            
-            const isEdit = courseId !== null;
-            const course = isEdit ? allCourses.find(c => c.id === courseId) : {};
-
-            title.textContent = isEdit ? `Edit Course: ${course.title}` : 'Add New Course';
-            form.onsubmit = (e) => { e.preventDefault(); saveCourse(courseId); };
-
-            form.querySelector('#course-title').value = course?.title || '';
-            form.querySelector('#course-description').value = course?.description || '';
-            form.querySelector('#course-price').value = course?.price || '';
-
-            showModal('course-modal');
-        }
-
-        async function saveCourse(courseId) {
-            const form = document.getElementById('course-form');
-            const title = form.querySelector('#course-title').value;
-            const description = form.querySelector('#course-description').value;
-            const price = parseFloat(form.querySelector('#course-price').value);
-
-            if (!title || !description || isNaN(price)) {
-                return showToast('Please fill all fields correctly.', 'error');
-            }
-
-            const isEdit = courseId !== null;
-            const courseData = {
-                title,
-                description,
-                price,
-                tutorId: userProfile.id,
-                tutorName: userProfile.displayName,
-                lastUpdated: serverTimestamp(),
-            };
-
-            try {
-                if (isEdit) {
-                    const courseRef = doc(window.firebase.db, 'courses', courseId);
-                    await updateDoc(courseRef, courseData);
-                    showToast('Course updated successfully!', 'success');
-                } else {
-                    courseData.createdAt = serverTimestamp();
-                    await addDoc(collection(window.firebase.db, 'courses'), courseData);
-                    showToast('Course added successfully!', 'success');
-                }
-                closeModal('course-modal');
-            } catch (error) {
-                console.error("Save Course Error:", error);
-                showToast('Failed to save course.', 'error');
-            }
-        }
-        
-        async function deleteCourse(courseId) {
-             if (!window.confirm('WARNING: Deleting a course will also delete all associated lessons! Are you sure?')) return;
-             
-             try {
-                // Delete the course document
-                await deleteDoc(doc(window.firebase.db, 'courses', courseId));
-                
-                // Note: Need to manually delete all lessons as subcollections aren't auto-deleted
-                const lessonsSnapshot = await getDocs(collection(window.firebase.db, `courses/${courseId}/lessons`));
-                const deleteLessonPromises = lessonsSnapshot.docs.map(d => deleteDoc(d.ref));
-                await Promise.all(deleteLessonPromises);
-
-                // Note: Subscriptions should NOT be deleted, but rather marked as 'canceled' in a production app. 
-                // For this MVP, we rely on the client filtering canceled subscriptions.
-                
-                showToast('Course and all lessons deleted successfully!', 'success');
-             } catch(error) {
-                console.error("Delete Course Error:", error);
-                showToast('Failed to delete course and lessons.', 'error');
-             }
-        }
-        
-        function openLessonModal(courseId, lessonId = null) {
-            const modal = document.getElementById('lesson-modal');
-            const title = modal.querySelector('#lesson-modal-title');
-            const form = modal.querySelector('#lesson-form');
-            
-            const isEdit = lessonId !== null;
-            
-            form.onsubmit = (e) => { e.preventDefault(); saveLesson(courseId, lessonId); };
-            
-            if (isEdit) {
-                const lessonsRef = collection(window.firebase.db, `courses/${courseId}/lessons`);
-                getDoc(doc(lessonsRef, lessonId)).then(docSnap => {
-                    const lesson = docSnap.data();
-                    title.textContent = `Edit Lesson: ${lesson.title}`;
-                    form.querySelector('#lesson-title').value = lesson?.title || '';
-                    form.querySelector('#lesson-youtube-url').value = lesson?.youtubeUrl || '';
-                    form.querySelector('#lesson-materials-url').value = lesson?.materialsUrl || '';
-                    form.querySelector('#lesson-quiz-url').value = lesson?.quizUrl || '';
-                    form.querySelector('#lesson-remarks').value = lesson?.remarks || '';
-                    form.querySelector('#lesson-order').value = lesson?.order || '';
-                }).catch(e => showToast('Failed to load lesson data.', 'error'));
-            } else {
-                title.textContent = 'Add New Lesson';
-                form.reset();
-                // Fetch next order number
-                fetchCourseLessons(courseId).then(lessons => {
-                    form.querySelector('#lesson-order').value = lessons.length + 1;
-                });
-            }
-
-            showModal('lesson-modal');
-        }
-
-        async function saveLesson(courseId, lessonId) {
-            const form = document.getElementById('lesson-form');
-            const title = form.querySelector('#lesson-title').value;
-            const youtubeUrl = form.querySelector('#lesson-youtube-url').value;
-            const materialsUrl = form.querySelector('#lesson-materials-url').value;
-            const quizUrl = form.querySelector('#lesson-quiz-url').value;
-            const remarks = form.querySelector('#lesson-remarks').value;
-            const order = parseInt(form.querySelector('#lesson-order').value, 10);
-
-            if (!title || !youtubeUrl || !materialsUrl || !quizUrl || isNaN(order)) {
-                return showToast('Please fill all fields correctly.', 'error');
-            }
-
-            const isEdit = lessonId !== null;
-            const lessonData = {
-                title,
-                youtubeUrl,
-                materialsUrl,
-                quizUrl,
-                remarks,
-                order,
-                lastUpdated: serverTimestamp(),
-            };
-            
-            const lessonRef = isEdit 
-                ? doc(window.firebase.db, `courses/${courseId}/lessons`, lessonId)
-                : doc(collection(window.firebase.db, `courses/${courseId}/lessons`));
-
-            try {
-                await setDoc(lessonRef, lessonData, { merge: true });
-                showToast(`Lesson ${isEdit ? 'updated' : 'added'} successfully!`, 'success');
-                closeModal('lesson-modal');
-                renderLessonList(courseId); // Refresh list
-            } catch (error) {
-                console.error("Save Lesson Error:", error);
-                showToast('Failed to save lesson.', 'error');
-            }
-        }
-        
-        async function deleteLesson(courseId, lessonId) {
-             if (!window.confirm('Are you sure you want to delete this lesson?')) return;
-             
-             try {
-                await deleteDoc(doc(window.firebase.db, `courses/${courseId}/lessons`, lessonId));
-                showToast('Lesson deleted successfully!', 'success');
-                renderLessonList(courseId); // Refresh list
-             } catch(error) {
-                console.error("Delete Lesson Error:", error);
-                showToast('Failed to delete lesson.', 'error');
-             }
-        }
-
-        // --- SUBSCRIPTION REVIEW ---
-        
-        function reviewSubscription(subId, status, remark) {
-            const subscription = subscriptionsToReview.find(s => s.id === subId);
-            if (!subscription) return showToast('Subscription not found.', 'error');
-            
-            // Remark is mandatory for cancellation
-            if (status === 'canceled' && !remark) {
-                return showToast('Reviewer remark is mandatory when canceling.', 'error');
-            }
-
-            // If a subscription is being approved/canceled for a tutor who is 'underReview', 
-            // the Super Admin must first approve the tutor, but we proceed with the subscription change anyway.
-
-            const subRef = doc(window.firebase.db, 'subscriptions', subId);
-            updateDoc(subRef, { 
-                status: status, 
-                reviewerRemark: remark, 
-                reviewedAt: serverTimestamp() 
-            }).then(() => {
-                showToast(`Subscription status set to ${status}!`, 'success');
-                closeModal('review-remark-modal');
-            }).catch(error => {
-                console.error("Review Subscription Error:", error);
-                showToast('Failed to review subscription.', 'error');
-            });
-        }
-        
-        function toggleReviewerRemark() {
-            const status = document.getElementById('review-status').value;
-            const remarkDiv = document.getElementById('reviewer-remark-div');
-            if (status === 'canceled') {
-                remarkDiv.classList.remove('hidden');
-            } else {
-                remarkDiv.classList.add('hidden');
-            }
-        }
-
-
-        // --- UI RENDERING & NAV BAR ---
-        
-        function updateNavbar() {
-            const navbar = document.getElementById('main-navbar');
-            navbar.innerHTML = '';
-            
-            const commonNav = `
-                <a onclick="navigateTo('dashboard')" class="text-gray-600 hover:text-indigo-600 cursor-pointer transition duration-150 py-2 px-3 rounded-lg">Dashboard</a>
-                <a onclick="navigateTo('browse-tutors')" class="text-gray-600 hover:text-indigo-600 cursor-pointer transition duration-150 py-2 px-3 rounded-lg">Browse Tutors</a>
-            `;
-
-            if (userProfile) {
-                const isAdmin = ['tutor', 'assistant', 'super_admin'].includes(userProfile.role);
-                
-                // Left side: Logo and common nav
-                const leftNav = `<div class="flex items-center space-x-6">
-                    <a onclick="navigateTo('landing')" class="text-2xl font-bold text-indigo-600 cursor-pointer">ILP</a>
-                    ${userProfile.role === 'student' ? commonNav : ''}
-                    ${isAdmin ? `<a onclick="navigateTo('admin-panel')" class="text-gray-600 hover:text-indigo-600 cursor-pointer transition duration-150 py-2 px-3 rounded-lg font-bold">Admin Panel</a>` : ''}
-                </div>`;
-
-                // Right side: User menu
-                const rightNav = `
-                    <div class="relative group">
-                        <button class="flex items-center space-x-2 bg-indigo-50 p-2 rounded-full hover:bg-indigo-100 transition duration-150">
-                            <img class="w-8 h-8 rounded-full" src="https://placehold.co/100x100/4f46e5/ffffff?text=${userProfile.displayName.charAt(0)}" onerror="this.src='https://placehold.co/100x100/4f46e5/ffffff?text=${userProfile.displayName.charAt(0)}'">
-                            <span class="text-sm font-medium text-gray-700 hidden sm:inline">${userProfile.displayName}</span>
-                            <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    <div class="flex justify-between items-center mt-auto pt-3 border-t border-gray-100 dark:border-gray-700">
+                        <span class="text-lg font-bold text-green-600">$${course.price.toFixed(2)}</span>
+                        <button onclick="navigateTo('course-details', { courseId: '${course.id}' })" 
+                                class="bg-indigo-500 text-white px-4 py-1.5 rounded-lg text-sm shadow hover:bg-indigo-600 transition">
+                            View Details
                         </button>
-                        <div class="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl py-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-200 pointer-events-none group-hover:pointer-events-auto">
-                            <a onclick="navigateTo('profile-settings')" class="block px-4 py-2 text-sm text-gray-700 hover:bg-indigo-50 cursor-pointer">Profile Settings</a>
-                            ${isAdmin ? `<a onclick="navigateTo('admin-panel')" class="block px-4 py-2 text-sm text-gray-700 hover:bg-indigo-50 cursor-pointer">Admin Panel</a>` : ''}
-                            <div class="border-t border-gray-100 my-1"></div>
-                            <a onclick="signOutUser()" class="block px-4 py-2 text-sm text-red-600 hover:bg-red-50 cursor-pointer">Sign Out</a>
-                        </div>
                     </div>
-                `;
-                navbar.innerHTML = leftNav + rightNav;
-            } else {
-                // Not authenticated
-                navbar.innerHTML = `<div class="flex items-center space-x-6">
-                    <a onclick="navigateTo('landing')" class="text-2xl font-bold text-indigo-600 cursor-pointer">ILP</a>
-                    ${commonNav}
                 </div>
-                <button onclick="signInWithGoogle()" class="px-5 py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md">
-                    Sign In / Sign Up
-                </button>`;
-            }
-        }
+            `;
+
+            return `
+                <section class="space-y-6">
+                    <h2 class="text-3xl font-bold text-gray-800 dark:text-gray-200 border-b pb-3">Course Catalog</h2>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        ${courses.length > 0 ? courses.map(renderCourseCard).join('') : renderLoadingScreen('No courses found or still loading...')}
+                    </div>
+                </section>
+            `;
+        };
         
-        // --- App Initialization ---
-        initializeAppAndAuth();
+        /**
+         * Renders the course details screen.
+         * @param {string} courseId 
+         */
+        const renderCourseDetails = async (courseId) => {
+            const { dataCache, userProfile } = appState;
+            const course = dataCache.courses.find(c => c.id === courseId);
+
+            if (!course) return renderNotFound();
+
+            // Check subscription status
+            const subscription = dataCache.subscriptions.find(sub => 
+                sub.userId === userProfile.id && sub.courseId === courseId
+            );
+            
+            const isApproved = subscription?.status === 'approved';
+            const isUnderReview = subscription?.status === 'underReview';
+            const isCreator = course.tutorId === userProfile.id;
+            
+            let statusText = '';
+            if (isCreator) {
+                statusText = '<span class="bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-300 px-3 py-1 rounded-full text-sm font-medium">Course Creator</span>';
+            } else if (isApproved) {
+                statusText = '<span class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 px-3 py-1 rounded-full text-sm font-medium">Enrolled (Approved)</span>';
+            } else if (isUnderReview) {
+                statusText = `<span class="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300 px-3 py-1 rounded-full text-sm font-medium">Subscription Under Review</span>`;
+            } else if (course.price > 0) {
+                statusText = `<button onclick="window.openSubscriptionModal('${course.id}')" class="bg-green-600 text-white px-5 py-2 rounded-lg shadow-md hover:bg-green-700 transition font-semibold">Subscribe for $${course.price.toFixed(2)}</button>`;
+            } else {
+                // Free course
+                statusText = '<span class="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 px-3 py-1 rounded-full text-sm font-medium">Free Course - Enroll Now</span>';
+            }
+
+            // Lesson list rendering
+            const renderLessons = () => {
+                if (!isApproved && !isCreator) {
+                    return `
+                        <p class="text-lg text-red-500 dark:text-red-400 p-4 border border-red-300 rounded-lg bg-red-50 dark:bg-red-900/50">
+                            Please complete your subscription to access lesson content.
+                        </p>
+                    `;
+                }
+
+                return course.lessons.map((lesson, index) => {
+                    const lessonId = `${index}`; // Simple index as ID for this example
+                    const isDone = dataCache.progress.has(`${courseId}-${lessonId}`);
+                    const statusIcon = isDone 
+                        ? '<i data-lucide="check-circle" class="w-5 h-5 text-green-500"></i>' 
+                        : '<i data-lucide="circle" class="w-5 h-5 text-gray-400"></i>';
+                    
+                    const actionButton = !isDone 
+                        ? `<button onclick="window.markLessonAsDone('${lessonId}', '${courseId}')" class="text-indigo-600 hover:text-indigo-800 transition text-sm font-medium">Mark as Done</button>`
+                        : `<span class="text-green-600 text-sm font-medium">Completed</span>`;
+
+                    return `
+                        <li class="flex items-center justify-between p-4 card rounded-lg shadow-sm border border-gray-100 dark:border-gray-700">
+                            <div class="flex items-center space-x-3">
+                                ${statusIcon}
+                                <span class="font-medium dark:text-gray-100">Lesson ${index + 1}: ${lesson}</span>
+                            </div>
+                            ${actionButton}
+                        </li>
+                    `;
+                }).join('');
+            };
+
+
+            return `
+                <section class="space-y-6">
+                    <div class="card p-6 rounded-xl shadow-lg">
+                        <button onclick="navigateTo('catalog')" class="text-indigo-600 hover:text-indigo-800 mb-4 flex items-center transition">
+                            <i data-lucide="arrow-left" class="w-5 h-5 mr-1"></i> Back to Catalog
+                        </button>
+                        <h2 class="text-3xl font-bold text-gray-800 dark:text-gray-200">${course.title}</h2>
+                        <div class="flex flex-wrap items-center space-x-4 mt-2 mb-4">
+                            ${statusText}
+                            <span class="text-gray-500 dark:text-gray-400 text-sm">Duration: ${course.duration}</span>
+                            <span class="text-gray-500 dark:text-gray-400 text-sm">Tutor: ${course.tutorName || 'N/A'}</span>
+                        </div>
+                        <p class="text-lg text-gray-600 dark:text-gray-300 mt-4">${course.description}</p>
+                    </div>
+
+                    <div class="card p-6 rounded-xl shadow-lg">
+                        <h3 class="text-2xl font-semibold border-b pb-3 mb-4 text-gray-800 dark:text-gray-200">Course Curriculum (${course.lessons.length} Lessons)</h3>
+                        <ul class="space-y-3">
+                            ${renderLessons()}
+                        </ul>
+                    </div>
+                </section>
+            `;
+        };
+
+        /**
+         * Renders the form for Tutors to add a new course.
+         */
+        const renderAddCourseForm = () => {
+            return `
+                <section class="max-w-3xl mx-auto card p-8 rounded-xl shadow-lg">
+                    <h2 class="text-3xl font-bold text-indigo-600 mb-6">Create New Course</h2>
+                    <form onsubmit="window.handleCourseSubmission(event)">
+                        <div class="space-y-4">
+                            <div>
+                                <label for="title" class="block text-sm font-medium dark:text-gray-300">Course Title</label>
+                                <input type="text" id="title" name="title" required class="mt-1 block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500">
+                            </div>
+                            <div>
+                                <label for="description" class="block text-sm font-medium dark:text-gray-300">Description</label>
+                                <textarea id="description" name="description" rows="4" required class="mt-1 block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label for="price" class="block text-sm font-medium dark:text-gray-300">Price ($)</label>
+                                    <input type="number" id="price" name="price" min="0" step="0.01" required class="mt-1 block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label for="duration" class="block text-sm font-medium dark:text-gray-300">Duration (e.g., 4 weeks)</label>
+                                    <input type="text" id="duration" name="duration" required class="mt-1 block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                            </div>
+                            <div>
+                                <label for="lessons" class="block text-sm font-medium dark:text-gray-300">Lessons (One per line)</label>
+                                <textarea id="lessons" name="lessons" rows="6" placeholder="Lesson 1: Introduction to X&#10;Lesson 2: Core Concepts&#10;Lesson 3: Project Workshop" class="mt-1 block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                            </div>
+                        </div>
+                        <button type="submit" class="w-full mt-6 bg-indigo-600 text-white font-semibold py-3 rounded-lg shadow-md hover:bg-indigo-700 transition disabled:opacity-50">
+                            Add Course
+                        </button>
+                    </form>
+                </section>
+            `;
+        };
+        
+        /**
+         * Renders the subscription management screen for Tutors.
+         */
+        const renderSubscriptionManagement = async () => {
+            const { dataCache, userProfile } = appState;
+            const subscriptions = dataCache.subscriptions;
+            const myCourses = dataCache.courses.filter(c => c.tutorId === userProfile.id).map(c => c.id);
+            
+            // Only show subscriptions for courses this tutor created
+            const relevantSubscriptions = subscriptions.filter(sub => myCourses.includes(sub.courseId));
+            
+            // Fetch necessary course and user data
+            const courseMap = new Map(dataCache.courses.map(c => [c.id, c.title]));
+            
+            // Group subscriptions by status for easier review
+            const groupedSubs = relevantSubscriptions.reduce((acc, sub) => {
+                acc[sub.status] = acc[sub.status] || [];
+                acc[sub.status].push(sub);
+                return acc;
+            }, {});
+
+            const renderSubscriptionRow = (sub) => {
+                const isUnderReview = sub.status === 'underReview';
+                return `
+                    <tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
+                        <td class="p-3 text-sm font-medium text-gray-900 dark:text-gray-100 truncate max-w-[150px]">${sub.userName}</td>
+                        <td class="p-3 text-sm text-gray-700 dark:text-gray-300">${courseMap.get(sub.courseId) || 'N/A'}</td>
+                        <td class="p-3 text-sm text-green-600 font-bold">$${sub.price.toFixed(2)}</td>
+                        <td class="p-3 text-sm">
+                            <a href="${sub.paymentProofUrl}" target="_blank" class="text-indigo-600 hover:underline flex items-center">
+                                <i data-lucide="image" class="w-4 h-4 mr-1"></i> View Proof
+                            </a>
+                        </td>
+                        <td class="p-3 text-sm">
+                            ${sub.reviewerRemark ? `<span class="italic text-gray-500 dark:text-gray-400">${sub.reviewerRemark}</span>` : 'N/A'}
+                        </td>
+                        <td class="p-3 text-sm">
+                            ${isUnderReview ? `
+                                <div class="flex space-x-2">
+                                    <button onclick="window.updateSubscriptionStatus('${sub.id}', true)" 
+                                            class="bg-green-500 text-white px-3 py-1 rounded-lg text-xs hover:bg-green-600 transition">Approve</button>
+                                    <button onclick="window.updateSubscriptionStatus('${sub.id}', false)" 
+                                            class="bg-red-500 text-white px-3 py-1 rounded-lg text-xs hover:bg-red-600 transition">Reject</button>
+                                </div>
+                            ` : `<span class="capitalize text-${sub.status === 'approved' ? 'green' : 'red'}-600 font-medium">${sub.status}</span>`}
+                        </td>
+                    </tr>
+                `;
+            };
+
+            const renderSubscriptionTable = (title, subs) => `
+                <div class="mb-8">
+                    <h3 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-200">${title} (${subs.length})</h3>
+                    <div class="overflow-x-auto card rounded-lg shadow-lg">
+                        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                            <thead class="bg-gray-50 dark:bg-gray-700">
+                                <tr>
+                                    <th class="p-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Student Name</th>
+                                    <th class="p-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Course</th>
+                                    <th class="p-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Price</th>
+                                    <th class="p-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Payment Proof</th>
+                                    <th class="p-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Remark</th>
+                                    <th class="p-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-800">
+                                ${subs.map(renderSubscriptionRow).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+
+
+            return `
+                <section class="space-y-6">
+                    <h2 class="text-3xl font-bold text-gray-800 dark:text-gray-200 border-b pb-3">Subscription Management</h2>
+                    
+                    ${relevantSubscriptions.length === 0 ? `
+                        <div class="text-center p-10 card rounded-xl shadow">
+                            <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300">No subscription requests for your courses.</h3>
+                        </div>
+                    ` : ''}
+
+                    ${groupedSubs.underReview && groupedSubs.underReview.length > 0 ? renderSubscriptionTable('New Requests (Under Review)', groupedSubs.underReview) : ''}
+                    ${groupedSubs.approved && groupedSubs.approved.length > 0 ? renderSubscriptionTable('Approved Subscriptions', groupedSubs.approved) : ''}
+                    ${groupedSubs.rejected && groupedSubs.rejected.length > 0 ? renderSubscriptionTable('Rejected Subscriptions', groupedSubs.rejected) : ''}
+                    
+                </section>
+            `;
+        };
+
+        // ====================================================================
+        // 7. MODAL & DARK MODE FUNCTIONS
+        // ====================================================================
+
+        /**
+         * Opens the subscription modal for a specific course.
+         */
+        window.openSubscriptionModal = (courseId) => {
+            const course = appState.dataCache.courses.find(c => c.id === courseId);
+            if (!course) return showToast('Course not found.', 'error');
+
+            const modalContainer = document.getElementById('modal-container');
+            modalContainer.innerHTML = `
+                <div class="modal-backdrop" onclick="window.closeModal()">
+                    <div class="card p-8 rounded-xl w-full max-w-md mx-4 shadow-2xl" onclick="event.stopPropagation()">
+                        <div class="flex justify-between items-start mb-4 border-b pb-3 dark:border-gray-700">
+                            <h3 class="text-2xl font-bold text-indigo-600">Subscribe to: ${course.title}</h3>
+                            <button onclick="window.closeModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition">
+                                <i data-lucide="x" class="w-6 h-6"></i>
+                            </button>
+                        </div>
+                        <p class="mb-4 text-gray-600 dark:text-gray-300">Total Price: <span class="text-green-600 font-bold text-xl">$${course.price.toFixed(2)}</span></p>
+
+                        <form onsubmit="window.handleSubscriptionRequest(event)" 
+                              data-course-id="${course.id}" 
+                              data-tutor-id="${course.tutorId}"
+                              data-price="${course.price}"
+                              data-duration="${course.duration}">
+                            
+                            <div class="space-y-4">
+                                <div>
+                                    <label for="paymentId" class="block text-sm font-medium dark:text-gray-300">Your Payment/Transaction ID</label>
+                                    <input type="text" id="paymentId" name="paymentId" required class="mt-1 block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label for="paymentProof" class="block text-sm font-medium dark:text-gray-300">Upload Payment Proof (Image)</label>
+                                    <input type="file" id="paymentProof" name="paymentProof" accept="image/*" required class="mt-1 block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                            </div>
+
+                            <button type="submit" class="w-full mt-6 bg-indigo-600 text-white font-semibold py-3 rounded-lg shadow-md hover:bg-indigo-700 transition disabled:opacity-50">
+                                <span id="btn-text">Submit Subscription Request</span>
+                                <span id="spinner" class="hidden animate-spin h-5 w-5 mr-3" role="status">⚙️</span>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            `;
+            modalContainer.classList.remove('hidden');
+            // Re-render icons inside the modal
+            lucide.createIcons();
+        };
+
+        /**
+         * Closes the universal modal.
+         */
+        window.closeModal = () => {
+            document.getElementById('modal-container').classList.add('hidden');
+        };
+
+        /**
+         * Toggles between dark and light modes.
+         */
+        window.toggleDarkMode = () => {
+            appState.isDarkMode = !appState.isDarkMode;
+            document.documentElement.classList.toggle('dark', appState.isDarkMode);
+            localStorage.setItem('darkMode', appState.isDarkMode);
+            renderApp(); // Re-render header to update icon
+        };
+
+        /**
+         * Signs the user out of Firebase Auth.
+         */
+        window.signOutUser = async () => {
+            try {
+                await signOut(appState.auth);
+                showToast('Signed out successfully!', 'info');
+                // onAuthStateChanged listener will handle state update and navigation
+            } catch (error) {
+                console.error("Sign out error:", error);
+                showToast('Failed to sign out.', 'error');
+            }
+        };
+
+
+        // --- App Initialization ---\
+        initializeServices();
 
     </script>
-    <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f8fafc; /* Lighter gray background */
-        }
-        /* Custom styles for a better UX */
-        .modal-backdrop {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(0, 0, 0, 0.5);
-            display: none; /* Controlled by JS */
-            align-items: center;
-            justify-content: center;
-            z-index: 50;
-        }
-        
-        /* Custom class for video protection */
-        .protected-video-wrapper {
-            position: relative;
-        }
-        .protected-video-wrapper::after {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            z-index: 10;
-            pointer-events: none; /* Allows clicks to pass through to the video controls */
-        }
-
-        /* Hide the default arrow marker for details summary */
-        details > summary::-webkit-details-marker {
-            display: none;
-        }
-    </style>
-</head>
-<body class="min-h-screen">
-
-    <!-- Navbar -->
-    <nav class="sticky top-0 bg-white shadow-md z-40">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between items-center h-16" id="main-navbar">
-                <!-- Content injected by updateNavbar() -->
-            </div>
-        </div>
-    </nav>
-
-    <!-- Main Content Area -->
-    <main class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-        <div id="app-content">
-            
-            <!-- Landing Page -->
-            <div id="landing" class="hidden">
-                <div class="text-center py-20 bg-indigo-50 rounded-2xl shadow-xl">
-                    <h1 class="text-5xl font-extrabold text-indigo-700 mb-4">Intelligent Learning Platform</h1>
-                    <p class="text-xl text-gray-600 mb-8">Learn from the best verified tutors globally.</p>
-                    <button onclick="userProfile ? navigateTo('browse-tutors') : signInWithGoogle()" class="px-8 py-4 bg-indigo-600 text-white text-lg font-bold rounded-xl hover:bg-indigo-700 transition duration-300 shadow-lg">
-                        ${userProfile ? 'Browse Tutors' : 'Sign In to Start'}
-                    </button>
-                </div>
-            </div>
-
-            <!-- Dashboard (Student) -->
-            <div id="dashboard" class="hidden">
-                <div id="dashboard-content"></div>
-            </div>
-
-            <!-- Browse Tutors Page -->
-            <div id="browse-tutors" class="hidden">
-                <h2 class="text-3xl font-bold text-gray-800 mb-6">Browse Verified Tutors</h2>
-                <input type="text" id="tutor-search" oninput="renderTutorsList()" placeholder="Search tutors by name or bio..." class="w-full p-3 mb-6 border border-gray-300 rounded-xl shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
-                <div id="tutors-list-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <!-- Tutors List rendered here -->
-                </div>
-            </div>
-
-            <!-- Course View Page -->
-            <div id="course-view" class="hidden" data-course-id="">
-                <button onclick="navigateTo('browse-tutors')" class="text-indigo-600 hover:text-indigo-800 font-medium mb-4 flex items-center">
-                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
-                    Back to Tutors
-                </button>
-                <div id="course-content"></div>
-            </div>
-            
-            <!-- Admin Panel (Tutor/Admin) -->
-            <div id="admin-panel" class="hidden">
-                <div id="admin-panel-content"></div>
-            </div>
-            
-            <!-- Profile Settings -->
-            <div id="profile-settings" class="hidden">
-                <h2 class="text-3xl font-bold text-gray-800 mb-6">My Profile</h2>
-                <div id="profile-settings-content"></div>
-            </div>
-
-        </div>
-    </main>
-
-    <!-- Global Toast Notification -->
-    <div id="toast-notification" class="fixed bottom-5 right-5 z-50 p-4 rounded-lg shadow-xl text-white transition-opacity duration-300 opacity-0" role="alert"></div>
-
-    <!-- Modals -->
-
-    <!-- Modal 1: Role Selection (New User) -->
-    <div id="role-selection-modal" class="modal-backdrop hidden transition duration-300 ease-out z-50">
-        <div class="bg-white p-8 rounded-2xl shadow-2xl max-w-sm w-full text-center">
-            <h3 class="text-2xl font-bold text-gray-900 mb-6">Select Your Role</h3>
-            <p class="text-gray-600 mb-8">Are you here to learn or to teach?</p>
-            <div class="space-y-4">
-                <button onclick="handleRoleSelection('student')" class="w-full py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition duration-150 shadow-lg">
-                    Student (I want to learn)
-                </button>
-                <button onclick="handleRoleSelection('tutor')" class="w-full py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 transition duration-150 shadow-lg">
-                    Tutor (I want to teach)
-                </button>
-            </div>
-            <p class="text-xs text-gray-500 mt-4">Tutor accounts require admin verification.</p>
-        </div>
-    </div>
-
-    <!-- Modal 2: Subscription Form -->
-    <div id="subscription-modal" class="modal-backdrop hidden transition duration-300 ease-out z-50" onclick="if(event.target === this) closeModal('subscription-modal')">
-        <div class="bg-white p-8 rounded-2xl shadow-2xl max-w-lg w-full">
-            <div id="subscription-modal-content">
-                <!-- Content injected by renderCoursePage -->
-            </div>
-        </div>
-    </div>
-    
-    <!-- Modal 3: Course Management (Add/Edit) -->
-    <div id="course-modal" class="modal-backdrop hidden transition duration-300 ease-out z-50" onclick="if(event.target === this) closeModal('course-modal')">
-        <div class="bg-white p-8 rounded-2xl shadow-2xl max-w-lg w-full">
-            <h3 id="course-modal-title" class="text-2xl font-bold mb-6 text-gray-900">Add New Course</h3>
-            <form id="course-form">
-                <div class="space-y-4">
-                    <label class="block">
-                        <span class="text-gray-700">Course Title</span>
-                        <input id="course-title" type="text" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-3">
-                    </label>
-                    <label class="block">
-                        <span class="text-gray-700">Description</span>
-                        <textarea id="course-description" rows="4" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-3"></textarea>
-                    </label>
-                    <label class="block">
-                        <span class="text-gray-700">Price (USD)</span>
-                        <input id="course-price" type="number" step="0.01" min="0" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-3">
-                    </label>
-                </div>
-                <button type="submit" class="w-full mt-6 px-4 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition duration-150 shadow-lg">Save Course</button>
-            </form>
-        </div>
-    </div>
-    
-    <!-- Modal 4: Lesson Management (Add/Edit) -->
-    <div id="lesson-modal" class="modal-backdrop hidden transition duration-300 ease-out z-50" onclick="if(event.target === this) closeModal('lesson-modal')">
-        <div class="bg-white p-8 rounded-2xl shadow-2xl max-w-xl w-full">
-            <h3 id="lesson-modal-title" class="text-2xl font-bold mb-6 text-gray-900">Add New Lesson</h3>
-            <form id="lesson-form">
-                <div class="grid grid-cols-2 gap-4">
-                    <label class="block col-span-2">
-                        <span class="text-gray-700">Lesson Title</span>
-                        <input id="lesson-title" type="text" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-3">
-                    </label>
-                    <label class="block">
-                        <span class="text-gray-700">Order/Sequence Number</span>
-                        <input id="lesson-order" type="number" min="1" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-3">
-                    </label>
-                    <label class="block">
-                        <span class="text-gray-700">Unlisted YouTube URL</span>
-                        <input id="lesson-youtube-url" type="url" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-3" placeholder="https://youtube.com/watch?v=...">
-                    </label>
-                    <label class="block col-span-2">
-                        <span class="text-gray-700">Learning Materials URL (PDF/PPT)</span>
-                        <input id="lesson-materials-url" type="url" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-3" placeholder="https://drive.google.com/...">
-                    </label>
-                    <label class="block col-span-2">
-                        <span class="text-gray-700">Embedded Quiz URL (Google Form)</span>
-                        <input id="lesson-quiz-url" type="url" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-3" placeholder="https://docs.google.com/forms/d/e/...">
-                    </label>
-                    <label class="block col-span-2">
-                        <span class="text-gray-700">Remarks (Text Input by Tutor)</span>
-                        <textarea id="lesson-remarks" rows="3" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-3"></textarea>
-                    </label>
-                </div>
-                <button type="submit" class="w-full mt-6 px-4 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition duration-150 shadow-lg">Save Lesson</button>
-            </form>
-        </div>
-    </div>
-    
-    <!-- Modal 5: Subscription Review / Remark -->
-    <div id="review-remark-modal" class="modal-backdrop hidden transition duration-300 ease-out z-50" onclick="if(event.target === this) closeModal('review-remark-modal')">
-        <div class="bg-white p-8 rounded-2xl shadow-2xl max-w-sm w-full">
-            <h3 class="text-2xl font-bold mb-4 text-gray-900">Review Subscription</h3>
-            <input type="hidden" id="review-sub-id">
-            
-            <form onsubmit="event.preventDefault(); reviewSubscription(document.getElementById('review-sub-id').value, document.getElementById('review-status').value, document.getElementById('reviewer-remark').value);">
-                <div class="space-y-4">
-                    <label class="block">
-                        <span class="text-gray-700">Action</span>
-                        <select id="review-status" onchange="toggleReviewerRemark()" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-3">
-                            <option value="subscribed">Approve (Subscribed)</option>
-                            <option value="canceled">Cancel (Refused)</option>
-                        </select>
-                    </label>
-                    <div id="reviewer-remark-div" class="hidden">
-                        <label class="block">
-                            <span class="text-gray-700">Cancellation Remark (Mandatory)</span>
-                            <textarea id="reviewer-remark" rows="3" class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-3"></textarea>
-                        </label>
-                    </div>
-                </div>
-                <button type="submit" class="w-full mt-6 px-4 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition duration-150 shadow-lg">Confirm Review</button>
-            </form>
-        </div>
-    </div>
-
 </body>
 </html>
