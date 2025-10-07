@@ -1,0 +1,931 @@
+
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>منصة التعلم الذكية</title>
+    <!-- تحميل Tailwind CSS لتصميم عصري ومتجاوب -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        .google-btn {
+            background-color: #4285F4;
+            color: white;
+            transition: background-color 0.3s;
+        }
+        .google-btn:hover {
+            background-color: #357ae8;
+        }
+        /* تصميم مخصص لليوتيوب لإخفاء أدوات المطور (خدعة) */
+        .youtube-embed-container {
+            position: relative;
+        }
+        /* لمنع النقر بالزر الأيمن على محتوى الفيديو */
+        .youtube-embed-container::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 10;
+        }
+        /* إخفاء شريط التمرير الافتراضي */
+        .scroll-content::-webkit-scrollbar {
+            display: none;
+        }
+        .scroll-content {
+            -ms-overflow-style: none; /* IE and Edge */
+            scrollbar-width: none; /* Firefox */
+        }
+        /* إخفاء عناصر التحكم في الفيديو لمنع التحميل الخاطئ */
+        iframe:focus { outline: none; }
+
+        /* Animation for modal */
+        .modal-enter {
+            opacity: 0;
+            transform: scale(0.95);
+        }
+        .modal-enter-active {
+            opacity: 1;
+            transform: scale(1);
+            transition: all 300ms ease-out;
+        }
+        .modal-leave {
+            opacity: 1;
+            transform: scale(1);
+        }
+        .modal-leave-active {
+            opacity: 0;
+            transform: scale(0.95);
+            transition: all 300ms ease-in;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <div id="app" class="flex flex-col flex-grow">
+        <!-- يتم تحميل محتوى التطبيق هنا -->
+    </div>
+
+    <script type="module">
+        // --- تهيئة المكتبات ومتغيرات البيئة ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { 
+            getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut,
+            GoogleAuthProvider, signInWithPopup 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, doc, setDoc, getDoc, collection, query, where,
+            onSnapshot, updateDoc, deleteDoc, addDoc, getDocs, setLogLevel, serverTimestamp
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- بيانات التهيئة والوصول الخارجية ---
+        const SUPER_ADMIN_EMAIL = "ahmed.abdelrahmany2018@gmail.com";
+        const IMGBB_API_KEY = "994244fa58d67f7d0f05ed58d03e7962";
+        const IMGBB_UPLOAD_URL = `https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`;
+        
+        // الإعدادات المقدمة من المستخدم كإعدادات احتياطية
+        const USER_PROVIDED_FIREBASE_CONFIG = {
+            apiKey: "AIzaSyAjPzI2w1ptxXjfF-nANHTg57zqfznOyVo",
+            authDomain: "daring-runway-406008.firebaseapp.com",
+            projectId: "daring-runway-406008",
+            storageBucket: "daring-runway-406008.appspot.com",
+            messagingSenderId: "233176620103",
+            appId: "1:233176620103:web:643129a90e6a74f9e8e562",
+            measurementId: "G-ERF6KJT723"
+        };
+        
+        // المتغيرات المتاحة من بيئة Canvas (مطلوبة)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        
+        // استخدام إعدادات البيئة إن وجدت، وإلا استخدام إعدادات المستخدم المضمنة (الحل للخطأ)
+        const firebaseConfig = typeof __firebase_config !== 'undefined' 
+            ? JSON.parse(__firebase_config) 
+            : USER_PROVIDED_FIREBASE_CONFIG;
+            
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        // --- حالة التطبيق ---
+        let app, db, auth;
+        let userId = null;
+        let userRole = null; // 'student', 'tutor', 'assistant', 'super_admin', 'guest'
+        let isAuthReady = false;
+        let isTutorUnderReview = false;
+        let activeListeners = []; // To hold unsubscribe functions
+
+        // حالات التوجيه الداخلي (Routing)
+        let currentView = 'login'; // 'login', 'dashboard', 'tutors', 'course_details', 'admin_panel'
+        let selectedTutorId = null;
+        let selectedCourseId = null;
+        let selectedSubscription = null;
+        
+        // مخازن البيانات في الذاكرة (للتخزين المؤقت والوصول السريع)
+        let tutors = [];
+        let courses = [];
+        let lessons = [];
+        let subscriptions = []; // اشتراكات الطلاب
+        let mySubscriptions = []; // اشتراكات المستخدم الحالي
+        let userProfile = {};
+        
+        const appContainer = document.getElementById('app');
+
+        // --- وظائف مساعدة للـ UI/UX والأمان ---
+
+        /**
+         * لعرض رسائل إشعارات مؤقتة للمستخدم
+         */
+        const showMessage = (message, title = 'تنبيه', type = 'info') => {
+            const colors = {
+                info: 'bg-yellow-100 border-yellow-400 text-yellow-700',
+                success: 'bg-green-100 border-green-400 text-green-700',
+                error: 'bg-red-100 border-red-400 text-red-700',
+            };
+            const messageId = Date.now();
+            const messageElement = document.createElement('div');
+            messageElement.id = `msg-${messageId}`;
+            messageElement.className = `fixed top-4 right-4 ${colors[type] || colors.info} px-4 py-3 rounded-lg shadow-xl z-50 transition-all duration-500 opacity-0 transform translate-x-10`;
+            messageElement.innerHTML = `<strong>${title}:</strong> ${message}`;
+            
+            document.body.appendChild(messageElement);
+
+            setTimeout(() => {
+                messageElement.classList.remove('opacity-0', 'translate-x-10');
+                messageElement.classList.add('opacity-100', 'translate-x-0');
+            }, 10);
+
+            setTimeout(() => {
+                messageElement.classList.remove('opacity-100', 'translate-x-0');
+                messageElement.classList.add('opacity-0', 'translate-x-10');
+                messageElement.addEventListener('transitionend', () => messageElement.remove());
+            }, 5000);
+        };
+
+        /**
+         * دالة للتحويل بين طرق العرض
+         */
+        window.navigateTo = (viewName, data = null) => {
+            currentView = viewName;
+            
+            if (data) {
+                if (data.courseId) {
+                    selectedCourseId = data.courseId;
+                    fetchCourseData(selectedCourseId);
+                }
+                if (data.tutorId) selectedTutorId = data.tutorId;
+            }
+
+            if (viewName === 'dashboard' && (userRole === 'tutor' || userRole === 'super_admin')) {
+                currentView = 'admin_panel';
+            }
+
+            renderApp();
+        };
+
+        // --- Firebase/Auth/Firestore Logic ---
+
+        /**
+         * تهيئة Firebase والمصادقة الأولية
+         */
+        const initializeFirebase = async () => {
+            if (!firebaseConfig || !firebaseConfig.apiKey) {
+                showMessage("فشل قاتل: إعدادات Firebase غير موجودة أو غير كاملة.", "خطأ", "error");
+                return;
+            }
+            
+            app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            
+            setLogLevel('error');
+
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("فشل المصادقة الأولية:", error);
+            }
+
+            onAuthStateChanged(auth, async (user) => {
+                // Clean up old listeners before setting up new ones
+                activeListeners.forEach(unsubscribe => unsubscribe());
+                activeListeners = [];
+
+                const isAuthenticated = user && !user.isAnonymous;
+
+                if (isAuthenticated) {
+                    userId = user.uid;
+                    await getUserProfileAndRole(user);
+                    setupDataListeners();
+                    currentView = (userRole === 'student' || userRole === 'guest') ? 'dashboard' : 'admin_panel';
+                } else {
+                    userId = null;
+                    userRole = 'guest';
+                    currentView = 'login';
+                    tutors = courses = lessons = subscriptions = mySubscriptions = [];
+                    userProfile = {};
+                }
+
+                isAuthReady = true;
+                renderApp();
+            });
+        };
+
+        window.signInWithGoogle = async () => {
+            const provider = new GoogleAuthProvider();
+            try {
+                const result = await signInWithPopup(auth, provider);
+                showMessage(`مرحباً بك، ${result.user.displayName}!`, "تم الدخول بنجاح", "success");
+            } catch (error) {
+                console.error("خطأ في تسجيل الدخول عبر Google:", error);
+                showMessage(`فشل تسجيل الدخول: ${error.message}`, "خطأ المصادقة", "error");
+            }
+        };
+        
+        window.signOutUser = async () => {
+            try {
+                await signOut(auth);
+                showMessage("تم تسجيل الخروج بنجاح.", "تسجيل الخروج", "success");
+            } catch (error) {
+                console.error("خطأ في تسجيل الخروج:", error);
+                showMessage(`فشل تسجيل الخروج: ${error.message}`, "خطأ", "error");
+            }
+        };
+
+        const getUserProfileAndRole = async (user) => {
+            const userDocRef = doc(db, `/artifacts/${appId}/users/${user.uid}`);
+            const profileRef = doc(db, `/artifacts/${appId}/users/${user.uid}/profiles/main`);
+
+            try {
+                const docSnap = await getDoc(profileRef);
+
+                if (docSnap.exists()) {
+                    userProfile = docSnap.data();
+                    userRole = userProfile.role || 'student'; 
+                    isTutorUnderReview = userProfile.tutorStatus === 'underReview';
+                } else {
+                    let assignedRole = 'student';
+                    let tutorStatus = 'verified';
+
+                    if (user.email === SUPER_ADMIN_EMAIL) {
+                        assignedRole = 'super_admin';
+                    } else if (confirm('هل ترغب في التسجيل كـ "معلم"؟ (إلغاء يعني طالب)')) {
+                        assignedRole = 'tutor';
+                        tutorStatus = 'underReview';
+                        isTutorUnderReview = true;
+                    }
+
+                    userRole = assignedRole;
+                    const newProfile = {
+                        userId: user.uid,
+                        email: user.email || 'N/A',
+                        displayName: user.displayName || 'مستخدم جديد',
+                        role: userRole,
+                        tutorStatus: tutorStatus,
+                        bio: `مرحباً! أنا ${user.displayName}.`,
+                        createdAt: serverTimestamp()
+                    };
+                    userProfile = newProfile;
+                    await setDoc(profileRef, newProfile);
+                    // Denormalize essential data to the root user document for querying
+                    await setDoc(userDocRef, {
+                        role: userRole,
+                        displayName: newProfile.displayName,
+                        email: newProfile.email,
+                        tutorStatus: tutorStatus
+                    }, { merge: true });
+                    showMessage(`تم إنشاء الحساب! تم تعيين دور: ${userRole.toUpperCase()}`, "أول دخول", "success");
+                }
+            } catch (e) {
+                console.error("خطأ في إدارة ملف تعريف المستخدم:", e);
+                userRole = 'guest';
+            }
+        };
+
+        window.uploadImageToImgBB = async (base64String) => {
+            const loadingIndicator = document.getElementById('payment-loading-indicator');
+            if (loadingIndicator) loadingIndicator.classList.remove('hidden');
+
+            try {
+                const base64Data = base64String.split(',')[1];
+                const formData = new FormData();
+                formData.append("image", base64Data);
+
+                const response = await fetch(IMGBB_UPLOAD_URL, { method: 'POST', body: formData });
+
+                if (!response.ok) throw new Error(`ImgBB API returned status ${response.status}`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage("تم رفع إثبات الدفع بنجاح!", "نجاح", "success");
+                    return result.data.url;
+                } else {
+                    throw new Error(result.error.message || "فشل غير معروف في الرفع.");
+                }
+
+            } catch (error) {
+                console.error("خطأ في رفع صورة ImgBB:", error);
+                showMessage(`فشل رفع الصورة: ${error.message}`, "خطأ ImgBB", "error");
+                return null;
+            } finally {
+                if (loadingIndicator) loadingIndicator.classList.add('hidden');
+            }
+        };
+
+        const setupDataListeners = () => {
+            if (!db || !userId) return;
+
+            // Listener for tutors
+            const tutorsQuery = query(collection(db, `/artifacts/${appId}/users`), where("role", "in", ["tutor", "super_admin"]));
+            const unsubTutors = onSnapshot(tutorsQuery, (snapshot) => {
+                tutors = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderApp();
+            }, (error) => console.error("Error fetching tutors:", error));
+            activeListeners.push(unsubTutors);
+
+            // Listener for courses
+            const coursesRef = collection(db, `/artifacts/${appId}/public/data/courses`);
+            const unsubCourses = onSnapshot(query(coursesRef), (snapshot) => {
+                courses = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderApp();
+            }, (error) => console.error("Error fetching courses:", error));
+            activeListeners.push(unsubCourses);
+            
+            // --- FIXED SUBSCRIPTION LISTENERS ---
+            const subscriptionsRef = collection(db, `/artifacts/${appId}/public/data/subscriptions`);
+
+            // 1. Listener for the current user's subscriptions (for their own dashboard)
+            const mySubscriptionsQuery = query(subscriptionsRef, where("userId", "==", userId));
+            const unsubMySubscriptions = onSnapshot(mySubscriptionsQuery, (snapshot) => {
+                mySubscriptions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderApp();
+            }, (error) => console.error("Error fetching MY subscriptions:", error));
+            activeListeners.push(unsubMySubscriptions);
+
+            // 2. Conditional listener for subscriptions that admins/tutors need to review
+            if (['tutor', 'super_admin', 'assistant'].includes(userRole)) {
+                let adminSubscriptionsQuery;
+                if (userRole === 'tutor') {
+                    // Tutors only see subscriptions for their courses
+                    adminSubscriptionsQuery = query(subscriptionsRef, where("tutorId", "==", userId));
+                } else {
+                    // Super Admins and Assistants see all subscriptions
+                    adminSubscriptionsQuery = query(subscriptionsRef);
+                }
+                
+                const unsubAdminSubscriptions = onSnapshot(adminSubscriptionsQuery, (snapshot) => {
+                    subscriptions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    renderApp();
+                }, (error) => console.error("Error fetching ADMIN subscriptions:", error));
+                activeListeners.push(unsubAdminSubscriptions);
+            } else {
+                // If user is a student, ensure the admin list is empty
+                subscriptions = [];
+            }
+            // --- END OF FIX ---
+
+            if (selectedCourseId) fetchCourseData(selectedCourseId);
+        };
+        
+        const fetchCourseData = (courseId) => {
+             const lessonsQuery = query(collection(db, `/artifacts/${appId}/public/data/lessons`), where("courseId", "==", courseId));
+             const unsub = onSnapshot(lessonsQuery, (snapshot) => {
+                lessons = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                lessons.sort((a, b) => (a.order || 0) - (b.order || 0));
+                selectedSubscription = mySubscriptions.find(sub => sub.courseId === courseId);
+                renderApp();
+             }, (error) => console.error("Error fetching lessons:", error));
+             // Note: This listener is temporary and not added to the global cleanup array.
+             // It will be replaced when navigating to a new course.
+        }
+        
+        window.saveTutorProfile = async (form) => {
+            const displayName = form.displayName.value;
+            const bio = form.bio.value;
+            const profileRef = doc(db, `/artifacts/${appId}/users/${userId}/profiles/main`);
+            const userDocRef = doc(db, `/artifacts/${appId}/users/${userId}`);
+            try {
+                await updateDoc(profileRef, { displayName, bio });
+                await updateDoc(userDocRef, { displayName });
+                userProfile.displayName = displayName;
+                userProfile.bio = bio;
+                showMessage("تم تحديث الملف الشخصي بنجاح!", "نجاح", "success");
+                navigateTo('admin_panel');
+            } catch (e) {
+                console.error("Error saving profile:", e);
+                showMessage("فشل تحديث الملف الشخصي.", "خطأ", "error");
+            }
+        };
+
+        window.submitSubscription = async (form, courseId, price, tutorId) => {
+            const fileInput = form.paymentProof;
+            if (!fileInput.files || fileInput.files.length === 0) {
+                return showMessage("الرجاء تحميل إثبات الدفع أولاً.", "تنبيه");
+            }
+            
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const imageUrl = await uploadImageToImgBB(e.target.result);
+                if (imageUrl) {
+                    const subData = {
+                        userId: userId,
+                        userName: userProfile.displayName,
+                        userEmail: userProfile.email,
+                        courseId: courseId,
+                        tutorId: tutorId,
+                        price: price,
+                        paymentId: form.paymentId.value,
+                        duration: form.duration.value,
+                        paymentProofUrl: imageUrl,
+                        status: 'underReview',
+                        subscriptionDate: serverTimestamp(),
+                        reviewerRemark: ''
+                    };
+                    try {
+                        await addDoc(collection(db, `/artifacts/${appId}/public/data/subscriptions`), subData);
+                        showMessage("تم إرسال طلب الاشتراك بنجاح! سيتم مراجعته قريباً.", "إرسال", "success");
+                        navigateTo('dashboard'); 
+                    } catch (e) {
+                        console.error("Error submitting subscription:", e);
+                        showMessage("فشل إرسال طلب الاشتراك.", "خطأ", "error");
+                    }
+                }
+            };
+            reader.readAsDataURL(fileInput.files[0]);
+        };
+        
+        window.markLessonFinished = async (lessonId) => {
+            const lessonRef = doc(db, `/artifacts/${appId}/users/${userId}/progress/lessons`, lessonId);
+            try {
+                await setDoc(lessonRef, { 
+                    finished: true,
+                    finishedAt: serverTimestamp(),
+                    courseId: selectedCourseId 
+                }, { merge: true });
+                showMessage("تم تحديد الدرس كمكتمل! أحسنت.", "تقدم", "success");
+            } catch (e) {
+                console.error("Error marking lesson finished:", e);
+                showMessage("فشل تحديد الدرس كمكتمل.", "خطأ", "error");
+            }
+        };
+        
+        window.updateSubscriptionStatus = async (subId, newStatus) => {
+            const remark = document.getElementById(`remark-${subId}`)?.value.trim() || '';
+            if (newStatus === 'Canceled' && !remark) {
+                return showMessage("يجب إضافة ملاحظة عند إلغاء الاشتراك.", "خطأ", "error");
+            }
+            const subRef = doc(db, `/artifacts/${appId}/public/data/subscriptions`, subId);
+            try {
+                await updateDoc(subRef, {
+                    status: newStatus,
+                    reviewerRemark: remark,
+                    reviewedBy: userProfile.displayName,
+                    reviewDate: serverTimestamp()
+                });
+                showMessage(`تم تحديث حالة الاشتراك إلى ${newStatus}.`, "نجاح", "success");
+            } catch (e) {
+                console.error("Error updating subscription status:", e);
+                showMessage("فشل تحديث حالة الاشتراك.", "خطأ", "error");
+            }
+        };
+        
+        window.updateTutorStatus = async (tutorId, newStatus) => {
+            if (userRole !== 'super_admin') {
+                return showMessage("غير مصرح لك بتغيير حالة المعلمين.", "خطأ", "error");
+            }
+            const userDocRef = doc(db, `/artifacts/${appId}/users/${tutorId}`);
+            const profileRef = doc(db, `/artifacts/${appId}/users/${tutorId}/profiles/main`);
+            try {
+                await updateDoc(profileRef, { tutorStatus: newStatus });
+                await updateDoc(userDocRef, { tutorStatus: newStatus }); // Keep queryable field in sync
+                showMessage(`تم تحديث حالة المعلم ${tutorId} إلى ${newStatus}.`, "نجاح", "success");
+            } catch (e) {
+                console.error("Error updating tutor status:", e);
+                showMessage("فشل تحديث حالة المعلم.", "خطأ", "error");
+            }
+        };
+
+        window.addCourse = async (form) => {
+            const courseData = {
+                title: form.title.value,
+                description: form.description.value,
+                price: form.price.value,
+                category: form.category.value,
+                tutorId: userId,
+                tutorName: userProfile.displayName,
+                createdAt: serverTimestamp()
+            };
+            try {
+                await addDoc(collection(db, `/artifacts/${appId}/public/data/courses`), courseData);
+                showMessage('تمت إضافة الدورة بنجاح!', 'نجاح', 'success');
+                navigateTo('admin_courses');
+            } catch (e) {
+                console.error("Error adding course: ", e);
+                showMessage('فشل في إضافة الدورة.', 'خطأ', 'error');
+            }
+        };
+        
+        window.addLesson = async (form) => {
+            const lessonData = {
+                courseId: selectedCourseId,
+                title: form.title.value,
+                order: parseInt(form.order.value, 10),
+                youtubeId: form.youtubeId.value,
+                materialsLinks: form.materialsLinks.value,
+                quizUrl: form.quizUrl.value,
+                tutorRemarks: form.tutorRemarks.value,
+                createdAt: serverTimestamp()
+            };
+            try {
+                await addDoc(collection(db, `/artifacts/${appId}/public/data/lessons`), lessonData);
+                showMessage('تمت إضافة الدرس بنجاح!', 'نجاح', 'success');
+                navigateTo('admin_lessons', { courseId: selectedCourseId });
+            } catch (e) {
+                console.error("Error adding lesson: ", e);
+                showMessage('فشل في إضافة الدرس.', 'خطأ', 'error');
+            }
+        };
+
+        window.filterTutors = () => {
+            const filter = document.getElementById('tutor-search').value.toUpperCase();
+            const cards = document.querySelectorAll('#tutor-list-container .tutor-card');
+            cards.forEach(card => {
+                const name = card.querySelector('h3').textContent.toUpperCase();
+                card.style.display = name.includes(filter) ? '' : 'none';
+            });
+        };
+        // --- UI Rendering ---
+
+        const renderApp = () => {
+            if (!isAuthReady) {
+                appContainer.innerHTML = `<div class="flex flex-grow items-center justify-center min-h-screen"><div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500"></div><p class="ml-4 text-gray-600">جارٍ تحميل حالة المصادقة...</p></div>`;
+                return;
+            }
+            appContainer.innerHTML = (userId && userRole !== 'guest')
+                ? `${renderNavbar()}<main class="flex-grow p-4 md:p-8 scroll-content">${renderContentView()}</main>`
+                : `<main class="flex-grow p-4 md:p-8">${renderLoginScreen()}</main>`;
+        };
+
+        const renderContentView = () => {
+            if (['tutor', 'assistant', 'super_admin'].includes(userRole)) {
+                 if (currentView.startsWith('admin') || currentView === 'tutor_profile_edit') {
+                    return renderAdminPanel();
+                 }
+            }
+
+            switch (currentView) {
+                case 'dashboard': return renderStudentDashboard();
+                case 'tutors': return renderTutorsList();
+                case 'course_details': return renderCourseDetails();
+                default: return renderStudentDashboard();
+            }
+        };
+
+        const renderNavbar = () => {
+            const userName = userProfile.displayName || 'المستخدم';
+            const isAdminView = ['tutor', 'assistant', 'super_admin'].includes(userRole);
+            return `
+                <nav class="bg-white shadow-lg p-4 flex justify-between items-center sticky top-0 z-10 border-b-4 border-indigo-500">
+                    <div class="text-2xl font-extrabold text-indigo-700 tracking-wider">
+                        ${userRole === 'super_admin' ? '👑' : '🎓'} ${userRole.toUpperCase()}
+                    </div>
+                    <div class="flex items-center space-x-3 rtl:space-x-reverse">
+                        <button onclick="navigateTo('dashboard')" class="text-gray-700 hover:text-indigo-600 font-medium p-2 rounded-lg transition duration-150">الرئيسية</button>
+                        <button onclick="navigateTo('tutors')" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md transform hover:scale-105">تصفح المدرسين</button>
+                        ${isAdminView ? `<button onclick="navigateTo('admin_panel')" class="text-white px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 transition duration-150 shadow-md transform hover:scale-105">لوحة الإدارة</button>` : ''}
+                    </div>
+                    <div class="text-right">
+                        <p class="text-sm font-bold text-gray-800">${userName}</p>
+                        <button onclick="signOutUser()" class="text-red-500 hover:text-red-700 text-sm mt-1 underline">تسجيل الخروج</button>
+                    </div>
+                </nav>
+            `;
+        };
+
+        const renderLoginScreen = () => `
+            <div class="flex flex-col items-center justify-center h-full pt-16">
+                <div class="bg-white p-8 md:p-12 rounded-2xl shadow-2xl w-full max-w-md text-center border-t-8 border-indigo-500">
+                    <h2 class="text-3xl font-extrabold text-gray-900 mb-6">سجل الدخول لبدء التعلم</h2>
+                    ${userId ? `
+                        <p class="text-lg text-green-600 mb-4">مرحباً بك مجدداً! ${userProfile.displayName}</p>
+                        <button onclick="navigateTo('dashboard')" class="bg-green-600 text-white flex items-center justify-center w-full py-3 px-4 rounded-lg font-bold text-lg shadow-xl hover:bg-green-700 transition duration-200 transform hover:scale-105">تصفح الدورات</button>
+                    ` : `
+                        <button onclick="signInWithGoogle()" class="google-btn flex items-center justify-center w-full py-3 px-4 rounded-lg font-bold text-lg shadow-xl hover:shadow-2xl transition duration-200">
+                            <svg class="w-5 h-5 mr-3" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.7 0 24 0 14.6 0 6.5 4.5 2.7 11.2l7.1 5.5s4.9-3.7 14.2-3.7z"></path><path fill="#4285F4" d="M46.7 24.5c0-1.87-.16-3.71-.48-5.5H24v10.2h12.5c-.53 2.84-2.14 5.38-4.7 7.16l7.13 5.55c4.76-4.2 7.55-10.3 7.55-17.4z"></path><path fill="#FBBC05" d="M10.1 29.5c-.32-1.93-.5-3.95-.5-6s.18-4.07.5-6l-7.1-5.5S.2 14.4 0 23.5s.2 9.1 2.9 11.5l7.2-5.5z"></path><path fill="#34A853" d="M24 48c6.4 0 11.6-2.1 15.4-5.6l-7.1-5.5c-2.4 1.7-5.7 2.8-8.3 2.8-6.3 0-11.8-4.3-13.9-10.1l-7.2 5.5C6.5 43.5 14.6 48 24 48z"></path><path fill="none" d="M0 0h48v48H0z"></path></svg>
+                            تسجيل الدخول عبر Google
+                        </button>
+                        <p class="text-xs text-gray-500 mt-4">سيتم سؤالك عن دورك (طالب/معلم) عند التسجيل لأول مرة.</p>
+                    `}
+                </div>
+            </div>
+        `;
+
+        const renderStudentDashboard = () => {
+             const progressContent = mySubscriptions.length > 0 ? mySubscriptions.map(sub => {
+                const course = courses.find(c => c.id === sub.courseId) || { title: 'دورة غير معروفة' };
+                const subStatusColor = sub.status === 'Subscribed' ? 'bg-green-500' : (sub.status === 'underReview' ? 'bg-yellow-500' : 'bg-red-500');
+                const reviewRemark = sub.reviewerRemark ? `<p class="text-xs text-red-600 mt-2 p-2 bg-red-100 rounded-lg">ملاحظة المراجع: ${sub.reviewerRemark}</p>` : '';
+                return `
+                    <div class="p-4 border border-gray-200 rounded-lg shadow-md">
+                        <div class="flex justify-between items-center">
+                            <h3 class="text-xl font-bold text-gray-800">${course.title}</h3>
+                            <span class="text-white text-xs font-semibold px-3 py-1 rounded-full ${subStatusColor}">${sub.status}</span>
+                        </div>
+                        ${reviewRemark}
+                        <button onclick="navigateTo('course_details', { courseId: '${sub.courseId}', tutorId: '${sub.tutorId}' })" class="mt-4 bg-indigo-500 text-white px-4 py-2 rounded-lg hover:bg-indigo-600 text-sm shadow-md">عرض الدورة</button>
+                    </div>
+                `;
+            }).join('') : '<p class="text-center text-gray-500">لم تشترك في أي دورة بعد.</p>';
+
+            return `
+                <div class="bg-white p-8 rounded-2xl shadow-2xl border-t-8 border-indigo-400">
+                    <h1 class="text-3xl font-bold text-gray-800 mb-6 border-b pb-3">ملف المستخدم والتقدم</h1>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="bg-indigo-50 p-6 rounded-xl shadow-lg border border-indigo-200">
+                            <h3 class="text-xl font-semibold text-indigo-700 mb-3">بياناتي</h3>
+                            <p class="text-gray-700">الاسم: <strong>${userProfile.displayName}</strong></p>
+                            <p class="text-gray-700">الدور: <strong>${userRole.toUpperCase()}</strong></p>
+                            <p class="text-gray-700 text-sm italic">البريد: ${userProfile.email}</p>
+                        </div>
+                        <div class="bg-green-50 p-6 rounded-xl shadow-lg border border-green-200">
+                            <h3 class="text-xl font-semibold text-green-700 mb-3">تصفح المدرسين</h3>
+                            <p class="text-gray-600 mb-4">ابدأ رحلتك التعليمية الآن.</p>
+                            <button onclick="navigateTo('tutors')" class="bg-green-500 text-white px-5 py-2 rounded-lg hover:bg-green-600 transition duration-150 shadow-md">تصفح المدرسين (${tutors.length})</button>
+                        </div>
+                    </div>
+                    <h2 class="text-2xl font-bold text-gray-800 mt-8 mb-4 border-b pb-2">سجل اشتراكاتي</h2>
+                    <div class="space-y-4">${progressContent}</div>
+                </div>
+            `;
+        };
+        
+        const renderTutorsList = () => {
+             const verifiedTutors = tutors.filter(t => t.tutorStatus === 'verified' || t.role === 'super_admin');
+             const tutorListHTML = verifiedTutors.map(t => {
+                const tutorCourses = courses.filter(c => c.tutorId === t.id);
+                return `
+                    <div class="tutor-card flex flex-col sm:flex-row items-start p-5 border border-gray-200 bg-white rounded-lg shadow-md hover:shadow-xl transition duration-200">
+                        <img src="${t.imageUrl || `https://placehold.co/80x80/6366f1/ffffff?text=${t.displayName.charAt(0)}`}" alt="صورة ${t.displayName}" class="w-20 h-20 rounded-full object-cover mb-4 sm:mb-0 sm:ml-4" />
+                        <div class="flex-grow">
+                            <h3 class="text-xl font-bold text-indigo-700">${t.displayName} (${t.role === 'super_admin' ? 'مشرف عام' : 'معلم'})</h3>
+                            <p class="text-gray-600 mt-1">${t.bio || 'لم يقم هذا المعلم بإضافة نبذة بعد.'}</p>
+                            <div class="mt-4">
+                                <h4 class="font-semibold text-gray-700">الدورات المتاحة (${tutorCourses.length}):</h4>
+                                ${tutorCourses.length > 0 ? tutorCourses.map(c => `
+                                    <button onclick="navigateTo('course_details', { courseId: '${c.id}', tutorId: '${t.id}' })" class="mt-2 mr-2 bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full hover:bg-indigo-200 text-sm">${c.title}</button>
+                                `).join('') : '<p class="text-sm text-gray-500 mt-1">لا توجد دورات متاحة حالياً.</p>'}
+                            </div>
+                        </div>
+                    </div>
+                `;
+             }).join('');
+
+            return `
+                <div class="bg-white p-8 rounded-2xl shadow-2xl">
+                    <h1 class="text-3xl font-bold text-indigo-600 mb-6 border-b pb-3">تصفح المدرسين المعتمدين</h1>
+                    <div class="mb-6">
+                        <input type="text" id="tutor-search" onkeyup="filterTutors()" placeholder="ابحث عن المدرسين..." class="w-full p-3 border border-gray-300 rounded-lg shadow-inner focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                    </div>
+                    <div id="tutor-list-container" class="space-y-6">
+                        ${tutorListHTML.length > 0 ? tutorListHTML : '<p class="text-center text-gray-500">لا يوجد مدرسون معتمدون حالياً.</p>'}
+                    </div>
+                </div>
+            `;
+        };
+        
+        const renderCourseDetails = () => {
+            const course = courses.find(c => c.id === selectedCourseId);
+            if (!course) return `<div class="p-8 text-center bg-white rounded-lg shadow-xl"><h2>لم يتم العثور على الدورة.</h2><button onclick="navigateTo('tutors')" class="mt-4 bg-gray-200 text-gray-700 px-5 py-2 rounded-lg hover:bg-gray-300">العودة</button></div>`;
+            
+            selectedSubscription = mySubscriptions.find(sub => sub.courseId === course.id);
+            const isSubscribed = selectedSubscription && selectedSubscription.status === 'Subscribed';
+            const isUnderReview = selectedSubscription && selectedSubscription.status === 'underReview';
+            const isCanceled = selectedSubscription && selectedSubscription.status === 'Canceled';
+            const isAdminOrTutor = ['tutor', 'super_admin', 'assistant'].includes(userRole);
+            const hasAccess = isSubscribed || isUnderReview || (isAdminOrTutor && course.tutorId === userId);
+
+            let mainContent;
+            if (hasAccess) mainContent = renderLessonList(lessons, isSubscribed || isAdminOrTutor);
+            else if (isCanceled) mainContent = renderSubscriptionForm(course, 'canceled');
+            else mainContent = renderSubscriptionForm(course, 'request');
+
+            return `
+                <div class="bg-white p-8 rounded-2xl shadow-2xl">
+                    <h1 class="text-3xl font-bold text-indigo-600 mb-4">${course.title}</h1>
+                    <p class="text-gray-600 mb-6 border-b pb-4">${course.description || ''}</p>
+                    ${mainContent}
+                    <button onclick="navigateTo('tutors')" class="mt-8 bg-gray-200 text-gray-700 px-5 py-2 rounded-lg hover:bg-gray-300 transition duration-150 shadow-md">&larr; العودة لقائمة المدرسين</button>
+                </div>
+            `;
+        };
+
+        const renderLessonList = (courseLessons, isFullySubscribed) => {
+            if (courseLessons.length === 0) return `<div class="p-8 text-center text-gray-500 bg-gray-50 rounded-lg">لم يتم إضافة دروس لهذه الدورة بعد.</div>`;
+            const lessonsHTML = courseLessons.map(lesson => {
+                const lessonContent = isFullySubscribed ? `
+                    <div class="p-4 bg-gray-50 rounded-lg mt-2 youtube-embed-container">
+                        <iframe width="100%" height="315" src="https://www.youtube.com/embed/${lesson.youtubeId || 'dQw4w9WgXcQ'}?rel=0" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                    </div>
+                    <div class="p-4 bg-gray-50 rounded-lg mt-2"><h4 class="font-semibold text-indigo-600">المواد التعليمية:</h4><a href="${lesson.materialsLinks}" target="_blank" class="text-blue-500 hover:underline">${lesson.materialsLinks || 'لا توجد مواد.'}</a></div>
+                    <div class="p-4 bg-gray-50 rounded-lg mt-2"><h4 class="font-semibold text-indigo-600">اختبار الدرس:</h4><iframe src="${lesson.quizUrl || ''}" width="100%" height="400" frameborder="0" marginheight="0" marginwidth="0">جارٍ التحميل...</iframe></div>
+                    <div class="p-4 bg-gray-50 rounded-lg mt-2"><h4 class="font-semibold text-indigo-600">ملاحظات المعلم:</h4><p class="text-gray-700">${lesson.tutorRemarks || 'لا توجد ملاحظات.'}</p></div>
+                    <button onclick="markLessonFinished('${lesson.id}')" class="mt-4 bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 text-sm shadow-md">تحديد كـ "مكتمل"</button>
+                ` : `<div class="p-4 bg-yellow-50 text-yellow-700 rounded-lg mt-2">حالة اشتراكك <strong>قيد المراجعة</strong>، يرجى الانتظار لتأكيد الدفع للوصول الكامل.</div>`;
+
+                return `
+                    <div class="accordion-item border border-gray-200 rounded-lg">
+                        <h2 class="accordion-header text-lg font-bold p-4 bg-gray-100 cursor-pointer flex justify-between items-center" onclick="this.nextElementSibling.classList.toggle('hidden'); this.querySelector('span').classList.toggle('rotate-90')">
+                            الدرس ${lesson.order || '-'}: ${lesson.title}
+                            <span class="text-xl transform transition duration-300">+</span>
+                        </h2>
+                        <div class="accordion-content p-4 hidden">${lessonContent}</div>
+                    </div>`;
+            }).join('');
+            return `<h2 class="text-2xl font-bold mb-4">قائمة الدروس:</h2><div class="space-y-3">${lessonsHTML}</div>`;
+        };
+
+        const renderSubscriptionForm = (course, mode) => {
+            let statusMessage = '';
+            if (mode === 'canceled') {
+                statusMessage = `<div class="p-4 bg-red-100 text-red-800 rounded-lg mb-4"><strong>تم إلغاء اشتراكك.</strong> ملاحظة: ${selectedSubscription?.reviewerRemark || 'لا توجد ملاحظة.'}. يمكنك إعادة تقديم طلب جديد.</div>`;
+            } else if (selectedSubscription?.status === 'underReview') {
+                 return `<div class="p-4 bg-yellow-100 text-yellow-800 rounded-lg mb-4"><strong>طلب اشتراكك قيد المراجعة حالياً.</strong></div>`;
+            }
+
+            return `
+                <h2 class="text-2xl font-bold text-red-600 mb-4">اشترك في دورة: ${course.title}</h2>
+                <div class="p-6 bg-red-50 rounded-xl shadow-lg border border-red-200">
+                    ${statusMessage}
+                    <p class="text-xl font-bold mb-4">السعر المطلوب: <strong>${course.price}</strong></p>
+                    <form onsubmit="event.preventDefault(); submitSubscription(this, '${course.id}', '${course.price}', '${course.tutorId}')">
+                        <div class="space-y-4">
+                            <div><label class="block text-sm font-medium text-gray-700">إثبات الدفع (صورة)</label><input type="file" name="paymentProof" accept="image/*" required class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"/><div id="payment-loading-indicator" class="hidden text-sm text-indigo-500 mt-2 flex items-center"><div class="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-500 ml-2"></div> جارٍ رفع الصورة...</div></div>
+                            <div><label class="block text-sm font-medium text-gray-700">معرف عملية الدفع / رقم التحويل</label><input type="text" name="paymentId" required placeholder="ادخل رقم المرجع البنكي أو المعاملة" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"/></div>
+                            <div><label class="block text-sm font-medium text-gray-700">مدة الاشتراك المطلوبة</label><select name="duration" required class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"><option value="1 month">شهر واحد</option><option value="3 months">3 أشهر</option><option value="1 year">سنة كاملة</option></select></div>
+                        </div>
+                        <button type="submit" class="mt-6 w-full bg-green-600 text-white py-3 rounded-lg font-bold hover:bg-green-700 transition duration-200 shadow-lg">إرسال طلب الاشتراك</button>
+                    </form>
+                </div>`;
+        };
+        
+        const renderAdminPanel = () => {
+            if (userRole === 'tutor' && isTutorUnderReview) return renderTutorUnderReviewScreen();
+            
+            const adminNav = [
+                { view: 'admin_subscriptions', label: 'مراجعة الاشتراكات', count: subscriptions.filter(s => s.status === 'underReview').length, color: 'red' },
+                ...(userRole !== 'assistant' ? [{ view: 'admin_courses', label: 'إدارة الدورات', count: courses.filter(c => c.tutorId === userId).length, color: 'indigo' }] : []),
+                { view: 'tutor_profile_edit', label: 'تعديل الملف الشخصي', count: null, color: 'blue' },
+                ...(userRole === 'super_admin' ? [{ view: 'admin_tutor_status', label: 'مراجعة المعلمين', count: tutors.filter(t => t.tutorStatus === 'underReview').length, color: 'purple' }] : []),
+            ];
+
+            return `
+                <div class="bg-white p-8 rounded-2xl shadow-2xl border-t-8 border-red-500">
+                    <h1 class="text-3xl font-bold text-red-700 mb-6 border-b pb-3">لوحة الإدارة الرئيسية</h1>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                        ${adminNav.map(item => `
+                            <div onclick="navigateTo('${item.view}')" class="p-6 rounded-xl shadow-lg border border-${item.color}-200 bg-${item.color}-50 cursor-pointer hover:bg-${item.color}-100 transition">
+                                <h3 class="text-xl font-semibold text-${item.color}-700 mb-2">${item.label}</h3>
+                                ${item.count !== null ? `<p class="text-gray-600">طلبات جديدة: <strong>${item.count}</strong></p>` : `<p class="text-gray-600 text-sm">تحديث معلوماتك العامة.</p>`}
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div id="admin-content-area" class="mt-8 pt-6 border-t-2 border-gray-200">${renderAdminContent()}</div>
+                </div>`;
+        };
+
+        const renderAdminContent = () => {
+            switch(currentView) {
+                case 'admin_panel': return `<p class="text-center text-gray-500">الرجاء اختيار قسم من الأعلى للبدء.</p>`;
+                case 'admin_subscriptions': return renderSubscriptionReview();
+                case 'admin_courses': return renderCourseManagement();
+                case 'admin_lessons': return renderLessonManagement();
+                case 'tutor_profile_edit': return renderTutorProfileEdit();
+                case 'admin_tutor_status': return renderTutorStatusReview();
+                default: return `<p class="text-center text-gray-500">محتوى غير معروف.</p>`;
+            }
+        };
+
+        const renderTutorUnderReviewScreen = () => `
+            <div class="flex flex-col items-center justify-center min-h-[50vh] p-8 bg-red-50 rounded-2xl shadow-2xl border-t-8 border-red-600">
+                <svg class="w-16 h-16 text-red-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.503-1.6 1.768-2.9L13.88 4.2C13.14 2.9 11.24 2.9 10.5 4.2L3.3 16.1C2.56 17.4 3.52 19 5.06 19z"></path></svg>
+                <h2 class="text-3xl font-bold text-red-700 mb-4">حسابك كمعلم قيد المراجعة</h2>
+                <p class="text-lg text-gray-600 text-center max-w-lg">للوصول للوحة الإدارة، يجب على المشرف العام <strong>(${SUPER_ADMIN_EMAIL})</strong> مراجعة طلبك وتفعيل حسابك.</p>
+            </div>`;
+        
+        const renderSubscriptionReview = () => {
+            const subsToReview = subscriptions.filter(s => s.status === 'underReview');
+            const subsHTML = subsToReview.length > 0 ? subsToReview.map(sub => `
+                <div class="p-5 border border-yellow-300 bg-yellow-50 rounded-lg shadow-md space-y-3">
+                    <div class="flex justify-between items-center"><h3 class="text-xl font-bold text-yellow-800">طلب من: ${sub.userName}</h3><span class="text-sm bg-yellow-500 text-white px-3 py-1 rounded-full font-semibold">${sub.status}</span></div>
+                    <p class="text-gray-700">الدورة: <strong>${courses.find(c => c.id === sub.courseId)?.title || 'محذوفة'}</strong></p>
+                    <p class="text-gray-700">معرف الدفع: <strong>${sub.paymentId}</strong> | المدة: <strong>${sub.duration}</strong></p>
+                    <a href="${sub.paymentProofUrl}" target="_blank" class="text-blue-500 hover:text-blue-700 underline block mt-2">عرض إثبات الدفع</a>
+                    <div class="mt-4 pt-3 border-t border-yellow-200 space-y-2">
+                        <label class="block text-sm font-medium text-gray-700">ملاحظات (إلزامي عند الإلغاء)</label>
+                        <input type="text" id="remark-${sub.id}" placeholder="أضف ملاحظة..." class="w-full p-2 border border-gray-300 rounded-lg"/>
+                        <div class="flex space-x-2 rtl:space-x-reverse">
+                            <button onclick="updateSubscriptionStatus('${sub.id}', 'Subscribed')" class="flex-1 bg-green-500 text-white p-2 rounded-lg hover:bg-green-600">قبول</button>
+                            <button onclick="updateSubscriptionStatus('${sub.id}', 'Canceled')" class="flex-1 bg-red-500 text-white p-2 rounded-lg hover:bg-red-600">إلغاء</button>
+                        </div>
+                    </div>
+                </div>`).join('') : '<div class="p-8 text-center text-gray-500 bg-gray-50 rounded-lg">لا توجد طلبات اشتراك قيد المراجعة.</div>';
+            return `<h2 class="text-2xl font-bold text-red-600 mb-4 border-b pb-2">مراجعة طلبات الاشتراك</h2><div class="space-y-4">${subsHTML}</div>`;
+        };
+        
+        const renderCourseManagement = () => {
+            const myCourses = userRole === 'super_admin' ? courses : courses.filter(c => c.tutorId === userId);
+            const coursesHTML = myCourses.map(course => `
+                 <div class="p-4 border border-indigo-300 bg-indigo-50 rounded-lg shadow-md flex justify-between items-center">
+                    <div><h3 class="text-xl font-bold text-indigo-700">${course.title}</h3><p class="text-sm text-gray-500">السعر: ${course.price || 'N/A'}</p></div>
+                    <div class="space-x-2 rtl:space-x-reverse">
+                        <button onclick="navigateTo('admin_lessons', { courseId: '${course.id}' })" class="bg-yellow-500 text-white px-3 py-1 rounded-lg hover:bg-yellow-600 text-sm">إدارة الدروس</button>
+                    </div>
+                 </div>`).join('');
+            return `
+                <h2 class="text-2xl font-bold text-red-600 mb-4 border-b pb-2">إدارة الدورات</h2>
+                ${renderCourseForm()}
+                <h3 class="text-xl font-bold text-gray-700 mt-8 mb-4 border-b pb-2">دوراتي الحالية</h3>
+                <div class="space-y-3">${myCourses.length > 0 ? coursesHTML : '<div class="p-8 text-center text-gray-500 bg-gray-50 rounded-lg">لم تقم بإضافة دورات بعد.</div>'}</div>`;
+        };
+
+        const renderCourseForm = () => `
+            <div class="p-6 bg-gray-50 rounded-lg border border-gray-200">
+                <h3 class="text-xl font-bold text-gray-800 mb-4">إضافة دورة جديدة</h3>
+                <form onsubmit="event.preventDefault(); addCourse(this)">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input name="title" required placeholder="عنوان الدورة" class="p-2 border rounded w-full"/>
+                        <input name="price" required placeholder="السعر" class="p-2 border rounded w-full"/>
+                        <input name="category" required placeholder="الفئة (مثال: برمجة)" class="p-2 border rounded w-full"/>
+                        <textarea name="description" required placeholder="وصف الدورة" class="p-2 border rounded w-full md:col-span-2" rows="3"></textarea>
+                    </div>
+                    <button type="submit" class="mt-4 bg-indigo-600 text-white p-3 rounded-lg hover:bg-indigo-700 font-semibold shadow-md">+ إضافة الدورة</button>
+                </form>
+            </div>`;
+        
+        const renderLessonManagement = () => {
+            const course = courses.find(c => c.id === selectedCourseId);
+            const courseLessons = lessons.filter(l => l.courseId === selectedCourseId);
+            const lessonsHTML = courseLessons.map(l => `<div class="p-3 border rounded bg-white flex justify-between"><span>الدرس ${l.order}: ${l.title}</span></div>`).join('');
+            return `
+                <button onclick="navigateTo('admin_courses')" class="mb-4 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg">&larr; العودة للدورات</button>
+                <h2 class="text-2xl font-bold text-red-600 mb-4 border-b pb-2">إدارة دروس دورة: ${course?.title}</h2>
+                ${renderLessonForm(courseLessons.length + 1)}
+                <h3 class="text-xl font-bold text-gray-700 mt-8 mb-4 border-b pb-2">الدروس الحالية</h3>
+                <div class="space-y-2">${courseLessons.length > 0 ? lessonsHTML : '<p class="text-center text-gray-500">لا توجد دروس بعد.</p>'}</div>
+            `;
+        };
+
+        const renderLessonForm = (nextOrder) => `
+            <div class="p-6 bg-gray-50 rounded-lg border border-gray-200">
+                <h3 class="text-xl font-bold text-gray-800 mb-4">إضافة درس جديد</h3>
+                <form onsubmit="event.preventDefault(); addLesson(this)">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input name="title" required placeholder="عنوان الدرس" class="p-2 border rounded w-full"/>
+                        <input name="order" type="number" required value="${nextOrder}" placeholder="ترتيب الدرس" class="p-2 border rounded w-full"/>
+                        <input name="youtubeId" required placeholder="معرف فيديو يوتيوب (e.g., dQw4w9WgXcQ)" class="p-2 border rounded w-full md:col-span-2"/>
+                        <input name="materialsLinks" placeholder="رابط المواد التعليمية" class="p-2 border rounded w-full"/>
+                        <input name="quizUrl" placeholder="رابط اختبار جوجل فورمز" class="p-2 border rounded w-full"/>
+                        <textarea name="tutorRemarks" placeholder="ملاحظات المعلم" class="p-2 border rounded w-full md:col-span-2" rows="3"></textarea>
+                    </div>
+                    <button type="submit" class="mt-4 bg-green-600 text-white p-3 rounded-lg hover:bg-green-700 font-semibold shadow-md">+ إضافة الدرس</button>
+                </form>
+            </div>`;
+
+        const renderTutorStatusReview = () => {
+             if (userRole !== 'super_admin') return '<div class="p-8 text-center text-red-500 bg-red-50 rounded-lg">غير مصرح لك.</div>';
+            const tutorsToReview = tutors.filter(t => t.tutorStatus === 'underReview');
+            const tutorsHTML = tutorsToReview.length > 0 ? tutorsToReview.map(t => `
+                <div class="p-4 border border-purple-300 bg-purple-50 rounded-lg shadow-md space-y-2">
+                    <h3 class="text-xl font-bold text-purple-700">${t.displayName} (${t.email})</h3>
+                    <p class="text-gray-700">الحالة: <strong>${t.tutorStatus}</strong></p>
+                    <button onclick="updateTutorStatus('${t.id}', 'verified')" class="bg-green-500 text-white px-3 py-1 rounded-lg">قبول</button>
+                    <button onclick="updateTutorStatus('${t.id}', 'canceled')" class="bg-red-500 text-white px-3 py-1 rounded-lg">إلغاء</button>
+                </div>`).join('') : '<div class="p-8 text-center text-gray-500 bg-gray-50 rounded-lg">لا يوجد معلمين جدد قيد المراجعة.</div>';
+            return `<h2 class="text-2xl font-bold text-red-600 mb-4 border-b pb-2">مراجعة المعلمين الجدد</h2><div class="space-y-4">${tutorsHTML}</div>`;
+        };
+
+        const renderTutorProfileEdit = () => `
+            <div class="p-8 rounded-2xl">
+                <h1 class="text-3xl font-bold text-blue-600 mb-6 border-b pb-3">تعديل ملفي الشخصي</h1>
+                <form onsubmit="event.preventDefault(); saveTutorProfile(this)">
+                    <div class="space-y-4 max-w-lg">
+                        <div><label class="block text-sm font-medium text-gray-700">الاسم المعروض</label><input type="text" name="displayName" value="${userProfile.displayName}" required class="mt-1 block w-full p-3 border border-gray-300 rounded-lg bg-gray-50"/></div>
+                        <div><label for="bio" class="block text-sm font-medium text-gray-700">النبذة والسيرة الذاتية</label><textarea id="bio" name="bio" rows="4" required placeholder="اكتب نبذة مختصرة عن خبراتك..." class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">${userProfile.bio || ''}</textarea></div>
+                    </div>
+                    <button type="submit" class="mt-6 bg-blue-600 text-white py-2 px-6 rounded-lg font-bold hover:bg-blue-700 transition shadow-lg">حفظ التعديلات</button>
+                </form>
+            </div>`;
+
+        // --- بدء تشغيل التطبيق ---
+        window.onload = initializeFirebase;
+    </script>
+</body>
+</html>
