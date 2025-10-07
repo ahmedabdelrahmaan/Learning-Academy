@@ -66,9 +66,12 @@
         };
 
         const ENV = {
-            // User-provided Firebase Config (Example values are kept here)
+            // User-provided Firebase Config (Fallback/Example values are kept here)
+            // NOTE: The API key is set to an empty string to prevent validation errors 
+            // when running outside of the intended environment, as the Canvas runtime 
+            // handles authentication.
             firebaseConfig: {
-                apiKey: "AIzaSyAjPzI2w1ptXjfF-nANHTg57zqfznOyVo",
+                apiKey: "", 
                 authDomain: "daring-runway-406008.firebaseapp.com",
                 projectId: "daring-runway-406008",
                 storageBucket: "daring-runway-406008.firebasestorage.app",
@@ -317,7 +320,7 @@
                 return `
                     <header class="card p-4 rounded-xl shadow-lg flex justify-between items-center sticky top-0 z-40 mb-4">
                         <div class="flex items-center space-x-6">
-                            <!-- Corrected: Router.navigateTo -> navigateTo -->
+                            <!-- navigateTo is globally exposed -->
                             <h1 onclick="navigateTo('dashboard')" class="text-xl font-extrabold text-indigo-600 cursor-pointer hover:text-indigo-800 transition">
                                 <span class="hidden sm:inline">IntelliLearn</span>
                                 <span class="sm:hidden">ILP</span>
@@ -333,11 +336,11 @@
                         </div>
                         <div class="flex items-center space-x-3">
                             ${profileSnippet}
-                            <!-- Corrected: Utils.toggleDarkMode -> toggleDarkMode -->
+                            <!-- toggleDarkMode is globally exposed -->
                             <button onclick="toggleDarkMode()" class="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition" aria-label="Toggle Dark Mode">
                                 ${isDarkMode ? '<i data-lucide="sun" class="w-5 h-5"></i>' : '<i data-lucide="moon" class="w-5 h-5"></i>'}
                             </button>
-                            <!-- Corrected: Service.signOutUser -> signOutUser -->
+                            <!-- signOutUser is globally exposed -->
                             <button onclick="signOutUser()" class="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition" aria-label="Sign Out">
                                 <i data-lucide="log-out" class="w-5 h-5"></i>
                             </button>
@@ -355,7 +358,7 @@
                     </div>
                     <div class="flex justify-between items-center mt-auto pt-3 border-t border-gray-100 dark:border-gray-700">
                         <span class="text-lg font-bold text-green-600">$${course.price.toFixed(2)}</span>
-                        <!-- Corrected: Router.navigateTo -> navigateTo -->
+                        <!-- navigateTo is globally exposed -->
                         <button onclick="navigateTo('course-details', { courseId: '${course.id}' })" 
                                 class="bg-indigo-500 text-white px-4 py-1.5 rounded-lg text-sm shadow hover:bg-indigo-600 transition">
                             ${isEnrolled ? 'View Course' : 'Details'}
@@ -446,7 +449,7 @@
                 } else if (isUnderReview) {
                     statusText = `<span class="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300 px-3 py-1 rounded-full text-sm font-medium">Subscription Under Review</span>`;
                 } else if (course.price > 0) {
-                    // Corrected: UI.openSubscriptionModal -> openSubscriptionModal
+                    // openSubscriptionModal is globally exposed
                     statusText = `<button onclick="openSubscriptionModal('${course.id}')" class="bg-green-600 text-white px-5 py-2 rounded-lg shadow-md hover:bg-green-700 transition font-semibold">Subscribe for $${course.price.toFixed(2)}</button>`;
                 } else {
                     statusText = '<span class="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 px-3 py-1 rounded-full text-sm font-medium">Paid Course</span>';
@@ -471,7 +474,7 @@
                             : '<i data-lucide="circle" class="w-5 h-5 text-gray-400"></i>';
                         
                         const actionButton = !isDone 
-                            // Corrected: Action.markLessonAsDone -> markLessonAsDone
+                            // markLessonAsDone is globally exposed
                             ? `<button onclick="markLessonAsDone('${lessonId}', '${courseId}')" class="text-indigo-600 hover:text-indigo-800 transition text-sm font-medium">Mark as Done</button>`
                             : `<span class="text-green-600 text-sm font-medium">Completed</span>`;
 
@@ -490,7 +493,7 @@
                 return `
                     <section class="space-y-6">
                         <div class="card p-6 rounded-xl shadow-lg">
-                            <!-- Corrected: Router.navigateTo -> navigateTo -->
+                            <!-- navigateTo is globally exposed -->
                             <button onclick="navigateTo('catalog')" class="text-indigo-600 hover:text-indigo-800 mb-4 flex items-center transition">
                                 <i data-lucide="arrow-left" class="w-5 h-5 mr-1"></i> Back to Catalog
                             </button>
@@ -516,7 +519,7 @@
             renderAddCourseForm: () => `
                 <section class="max-w-3xl mx-auto card p-8 rounded-xl shadow-lg">
                     <h2 class="text-3xl font-bold text-indigo-600 mb-6">Create New Course</h2>
-                    <!-- Corrected: Action.handleCourseSubmission -> handleCourseSubmission -->
+                    <!-- handleCourseSubmission is globally exposed -->
                     <form onsubmit="handleCourseSubmission(event)">
                         <div class="space-y-4">
                             <div>
@@ -581,10 +584,10 @@
                             <td class="p-3 text-sm">
                                 ${isUnderReview ? `
                                     <div class="flex space-x-2">
-                                        <!-- Corrected: Action.updateSubscriptionStatus -> updateSubscriptionStatus -->
+                                        <!-- updateSubscriptionStatus is globally exposed -->
                                         <button onclick="updateSubscriptionStatus('${sub.id}', true)" 
                                                 class="bg-green-500 text-white px-3 py-1 rounded-lg text-xs hover:bg-green-600 transition">Approve</button>
-                                        <!-- Corrected: Action.updateSubscriptionStatus -> updateSubscriptionStatus -->
+                                        <!-- updateSubscriptionStatus is globally exposed -->
                                         <button onclick="updateSubscriptionStatus('${sub.id}', false)" 
                                                 class="bg-red-500 text-white px-3 py-1 rounded-lg text-xs hover:bg-red-600 transition">Reject</button>
                                     </div>
@@ -640,19 +643,19 @@
                 if (!course) return Utils.showToast('Course not found.', 'error');
 
                 const contentHTML = `
-                    <!-- Corrected: Utils.closeModal -> closeModal -->
+                    <!-- closeModal is globally exposed -->
                     <div class="modal-backdrop" onclick="closeModal()">
                         <div class="card p-8 rounded-xl w-full max-w-md mx-4 shadow-2xl" onclick="event.stopPropagation()">
                             <div class="flex justify-between items-start mb-4 border-b pb-3 dark:border-gray-700">
                                 <h3 class="text-2xl font-bold text-indigo-600">Subscribe to: ${course.title}</h3>
-                                <!-- Corrected: Utils.closeModal -> closeModal -->
+                                <!-- closeModal is globally exposed -->
                                 <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition">
                                     <i data-lucide="x" class="w-6 h-6"></i>
                                 </button>
                             </div>
                             <p class="mb-4 text-gray-600 dark:text-gray-300">Total Price: <span class="text-green-600 font-bold text-xl">$${course.price.toFixed(2)}</span></p>
 
-                            <!-- Corrected: Action.handleSubscriptionRequest -> handleSubscriptionRequest -->
+                            <!-- handleSubscriptionRequest is globally exposed -->
                             <form onsubmit="handleSubscriptionRequest(event)" 
                                 data-course-id="${course.id}" 
                                 data-tutor-id="${course.tutorId}"
