@@ -66,7 +66,7 @@
         };
 
         const ENV = {
-            // User-provided Firebase Config
+            // User-provided Firebase Config (Example values are kept here)
             firebaseConfig: {
                 apiKey: "AIzaSyAjPzI2w1ptXjfF-nANHTg57zqfznOyVo",
                 authDomain: "daring-runway-406008.firebaseapp.com",
@@ -76,7 +76,7 @@
                 appId: "1:233176620103:web:643129a90e6a74f9e8e562",
                 measurementId: "G-ERF6KJT723"
             },
-            // User-provided IMGBB Key
+            // User-provided IMGBB Key (Example value is kept here)
             IMGBB_API_KEY: '994244fa58d67f7d0f05ed58d03e7962',
             // Environment variables provided by Canvas
             appId: typeof __app_id !== 'undefined' ? __app_id : 'default-app-id',
@@ -132,6 +132,7 @@
             }
         };
 
+        // EXPOSE UTILITIES TO GLOBAL SCOPE
         window.showToast = Utils.showToast;
         window.closeModal = Utils.closeModal;
         window.toggleDarkMode = Utils.toggleDarkMode;
@@ -141,7 +142,12 @@
             /** Initializes Firebase and sets up authentication. */
             init: async () => {
                 try {
-                    const app = initializeApp(ENV.firebaseConfig);
+                    // Check for global variables and configure Firebase
+                    const firebaseConfig = typeof __firebase_config !== 'undefined' 
+                        ? JSON.parse(__firebase_config) 
+                        : ENV.firebaseConfig;
+
+                    const app = initializeApp(firebaseConfig);
                     APP_STATE.db = getFirestore(app);
                     APP_STATE.auth = getAuth(app);
                     
@@ -261,7 +267,7 @@
                 });
             },
 
-            /** Global sign out function. Exposed globally. */
+            /** Global sign out function. */
             signOutUser: async () => {
                 try {
                     await signOut(APP_STATE.auth);
@@ -273,6 +279,7 @@
             },
         };
 
+        // EXPOSE SERVICE FUNCTIONS TO GLOBAL SCOPE
         window.signOutUser = Service.signOutUser;
 
         // --- 5. COMPONENTS (UI Rendering) ---
@@ -291,7 +298,7 @@
                 <div class="text-center py-20">
                     <h2 class="text-4xl font-bold text-red-600 dark:text-red-400">404 - Page Not Found</h2>
                     <p class="mt-4 text-lg dark:text-gray-300">The requested page does not exist.</p>
-                    <button onclick="Router.navigateTo('dashboard')" class="mt-6 bg-indigo-600 text-white px-6 py-2 rounded-lg shadow hover:bg-indigo-700 transition">Go to Dashboard</button>
+                    <button onclick="navigateTo('dashboard')" class="mt-6 bg-indigo-600 text-white px-6 py-2 rounded-lg shadow hover:bg-indigo-700 transition">Go to Dashboard</button>
                 </div>
             `,
 
@@ -310,25 +317,28 @@
                 return `
                     <header class="card p-4 rounded-xl shadow-lg flex justify-between items-center sticky top-0 z-40 mb-4">
                         <div class="flex items-center space-x-6">
-                            <h1 onclick="Router.navigateTo('dashboard')" class="text-xl font-extrabold text-indigo-600 cursor-pointer hover:text-indigo-800 transition">
+                            <!-- Corrected: Router.navigateTo -> navigateTo -->
+                            <h1 onclick="navigateTo('dashboard')" class="text-xl font-extrabold text-indigo-600 cursor-pointer hover:text-indigo-800 transition">
                                 <span class="hidden sm:inline">IntelliLearn</span>
                                 <span class="sm:hidden">ILP</span>
                             </h1>
                             <nav class="hidden md:flex space-x-4">
-                                <button onclick="Router.navigateTo('dashboard')" class="text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition">Dashboard</button>
-                                <button onclick="Router.navigateTo('catalog')" class="text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition">Catalog</button>
+                                <button onclick="navigateTo('dashboard')" class="text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition">Dashboard</button>
+                                <button onclick="navigateTo('catalog')" class="text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition">Catalog</button>
                                 ${userProfile?.isTutor ? `
-                                    <button onclick="Router.navigateTo('add-course')" class="text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition">Add Course</button>
-                                    <button onclick="Router.navigateTo('manage-subscriptions')" class="text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition">Manage Subs</button>
+                                    <button onclick="navigateTo('add-course')" class="text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition">Add Course</button>
+                                    <button onclick="navigateTo('manage-subscriptions')" class="text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition">Manage Subs</button>
                                 ` : ''}
                             </nav>
                         </div>
                         <div class="flex items-center space-x-3">
                             ${profileSnippet}
-                            <button onclick="Utils.toggleDarkMode()" class="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition" aria-label="Toggle Dark Mode">
+                            <!-- Corrected: Utils.toggleDarkMode -> toggleDarkMode -->
+                            <button onclick="toggleDarkMode()" class="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition" aria-label="Toggle Dark Mode">
                                 ${isDarkMode ? '<i data-lucide="sun" class="w-5 h-5"></i>' : '<i data-lucide="moon" class="w-5 h-5"></i>'}
                             </button>
-                            <button onclick="Service.signOutUser()" class="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition" aria-label="Sign Out">
+                            <!-- Corrected: Service.signOutUser -> signOutUser -->
+                            <button onclick="signOutUser()" class="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition" aria-label="Sign Out">
                                 <i data-lucide="log-out" class="w-5 h-5"></i>
                             </button>
                         </div>
@@ -345,7 +355,8 @@
                     </div>
                     <div class="flex justify-between items-center mt-auto pt-3 border-t border-gray-100 dark:border-gray-700">
                         <span class="text-lg font-bold text-green-600">$${course.price.toFixed(2)}</span>
-                        <button onclick="Router.navigateTo('course-details', { courseId: '${course.id}' })" 
+                        <!-- Corrected: Router.navigateTo -> navigateTo -->
+                        <button onclick="navigateTo('course-details', { courseId: '${course.id}' })" 
                                 class="bg-indigo-500 text-white px-4 py-1.5 rounded-lg text-sm shadow hover:bg-indigo-600 transition">
                             ${isEnrolled ? 'View Course' : 'Details'}
                         </button>
@@ -383,7 +394,7 @@
                         ` : `
                             <div class="text-center p-10 card rounded-xl shadow">
                                 <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300">You are not currently enrolled in any courses.</h3>
-                                <p class="mt-2 text-gray-500">Explore the <a href="#" onclick="Router.navigateTo('catalog')" class="text-indigo-600 hover:underline">Catalog</a> to find your next lesson!</p>
+                                <p class="mt-2 text-gray-500">Explore the <a href="#" onclick="navigateTo('catalog')" class="text-indigo-600 hover:underline">Catalog</a> to find your next lesson!</p>
                             </div>
                         `}
 
@@ -435,7 +446,8 @@
                 } else if (isUnderReview) {
                     statusText = `<span class="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300 px-3 py-1 rounded-full text-sm font-medium">Subscription Under Review</span>`;
                 } else if (course.price > 0) {
-                    statusText = `<button onclick="UI.openSubscriptionModal('${course.id}')" class="bg-green-600 text-white px-5 py-2 rounded-lg shadow-md hover:bg-green-700 transition font-semibold">Subscribe for $${course.price.toFixed(2)}</button>`;
+                    // Corrected: UI.openSubscriptionModal -> openSubscriptionModal
+                    statusText = `<button onclick="openSubscriptionModal('${course.id}')" class="bg-green-600 text-white px-5 py-2 rounded-lg shadow-md hover:bg-green-700 transition font-semibold">Subscribe for $${course.price.toFixed(2)}</button>`;
                 } else {
                     statusText = '<span class="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 px-3 py-1 rounded-full text-sm font-medium">Paid Course</span>';
                 }
@@ -459,7 +471,8 @@
                             : '<i data-lucide="circle" class="w-5 h-5 text-gray-400"></i>';
                         
                         const actionButton = !isDone 
-                            ? `<button onclick="Action.markLessonAsDone('${lessonId}', '${courseId}')" class="text-indigo-600 hover:text-indigo-800 transition text-sm font-medium">Mark as Done</button>`
+                            // Corrected: Action.markLessonAsDone -> markLessonAsDone
+                            ? `<button onclick="markLessonAsDone('${lessonId}', '${courseId}')" class="text-indigo-600 hover:text-indigo-800 transition text-sm font-medium">Mark as Done</button>`
                             : `<span class="text-green-600 text-sm font-medium">Completed</span>`;
 
                         return `
@@ -477,7 +490,8 @@
                 return `
                     <section class="space-y-6">
                         <div class="card p-6 rounded-xl shadow-lg">
-                            <button onclick="Router.navigateTo('catalog')" class="text-indigo-600 hover:text-indigo-800 mb-4 flex items-center transition">
+                            <!-- Corrected: Router.navigateTo -> navigateTo -->
+                            <button onclick="navigateTo('catalog')" class="text-indigo-600 hover:text-indigo-800 mb-4 flex items-center transition">
                                 <i data-lucide="arrow-left" class="w-5 h-5 mr-1"></i> Back to Catalog
                             </button>
                             <h2 class="text-3xl font-bold text-gray-800 dark:text-gray-200">${course.title}</h2>
@@ -502,7 +516,8 @@
             renderAddCourseForm: () => `
                 <section class="max-w-3xl mx-auto card p-8 rounded-xl shadow-lg">
                     <h2 class="text-3xl font-bold text-indigo-600 mb-6">Create New Course</h2>
-                    <form onsubmit="Action.handleCourseSubmission(event)">
+                    <!-- Corrected: Action.handleCourseSubmission -> handleCourseSubmission -->
+                    <form onsubmit="handleCourseSubmission(event)">
                         <div class="space-y-4">
                             <div>
                                 <label for="title" class="block text-sm font-medium dark:text-gray-300">Course Title</label>
@@ -566,9 +581,11 @@
                             <td class="p-3 text-sm">
                                 ${isUnderReview ? `
                                     <div class="flex space-x-2">
-                                        <button onclick="Action.updateSubscriptionStatus('${sub.id}', true)" 
+                                        <!-- Corrected: Action.updateSubscriptionStatus -> updateSubscriptionStatus -->
+                                        <button onclick="updateSubscriptionStatus('${sub.id}', true)" 
                                                 class="bg-green-500 text-white px-3 py-1 rounded-lg text-xs hover:bg-green-600 transition">Approve</button>
-                                        <button onclick="Action.updateSubscriptionStatus('${sub.id}', false)" 
+                                        <!-- Corrected: Action.updateSubscriptionStatus -> updateSubscriptionStatus -->
+                                        <button onclick="updateSubscriptionStatus('${sub.id}', false)" 
                                                 class="bg-red-500 text-white px-3 py-1 rounded-lg text-xs hover:bg-red-600 transition">Reject</button>
                                     </div>
                                 ` : `<span class="capitalize text-${sub.status === 'approved' ? 'green' : 'red'}-600 font-medium">${sub.status}</span>`}
@@ -623,17 +640,20 @@
                 if (!course) return Utils.showToast('Course not found.', 'error');
 
                 const contentHTML = `
-                    <div class="modal-backdrop" onclick="Utils.closeModal()">
+                    <!-- Corrected: Utils.closeModal -> closeModal -->
+                    <div class="modal-backdrop" onclick="closeModal()">
                         <div class="card p-8 rounded-xl w-full max-w-md mx-4 shadow-2xl" onclick="event.stopPropagation()">
                             <div class="flex justify-between items-start mb-4 border-b pb-3 dark:border-gray-700">
                                 <h3 class="text-2xl font-bold text-indigo-600">Subscribe to: ${course.title}</h3>
-                                <button onclick="Utils.closeModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition">
+                                <!-- Corrected: Utils.closeModal -> closeModal -->
+                                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition">
                                     <i data-lucide="x" class="w-6 h-6"></i>
                                 </button>
                             </div>
                             <p class="mb-4 text-gray-600 dark:text-gray-300">Total Price: <span class="text-green-600 font-bold text-xl">$${course.price.toFixed(2)}</span></p>
 
-                            <form onsubmit="Action.handleSubscriptionRequest(event)" 
+                            <!-- Corrected: Action.handleSubscriptionRequest -> handleSubscriptionRequest -->
+                            <form onsubmit="handleSubscriptionRequest(event)" 
                                 data-course-id="${course.id}" 
                                 data-tutor-id="${course.tutorId}"
                                 data-price="${course.price}"
@@ -662,6 +682,7 @@
             }
         };
 
+        // EXPOSE UI FUNCTIONS TO GLOBAL SCOPE
         window.openSubscriptionModal = UI.openSubscriptionModal;
 
         // --- 6. ACTIONS (Event Handlers) ---
@@ -774,7 +795,7 @@
                 if (!userProfile?.isTutor) return Utils.showToast('Permission denied.', 'error');
 
                 const status = approve ? 'approved' : 'rejected';
-                // Using prompt per instruction to gather input
+                // NOTE: Using prompt for simple data gathering, as per constraints.
                 const remark = prompt(`Enter a brief remark for the ${status} status:`); 
                 if (remark === null) return; 
 
@@ -792,10 +813,11 @@
             }
         };
 
+        // EXPOSE ACTION FUNCTIONS TO GLOBAL SCOPE
         window.handleCourseSubmission = Action.handleCourseSubmission;
         window.handleSubscriptionRequest = Action.handleSubscriptionRequest;
         window.updateSubscriptionStatus = Action.updateSubscriptionStatus;
-        window.markLessonAsDone = Action.markLessonAsDone; // Expose for lesson list
+        window.markLessonAsDone = Action.markLessonAsDone;
 
         // --- 7. ROUTER ---
         const Router = {
@@ -860,6 +882,7 @@
             }
         };
 
+        // EXPOSE ROUTER FUNCTIONS TO GLOBAL SCOPE
         window.navigateTo = Router.navigateTo;
         window.onpopstate = Router.onPopState;
 
