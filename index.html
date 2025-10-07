@@ -1,428 +1,908 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Intelligent Learning Platform — SPA</title>
-  <meta name="description" content="Single page learning app — Firebase Auth, Firestore, ImgBB upload, offline & caching friendly" />
-
-  <!-- Tailwind CDN (quick) — replace with build pipeline for production -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-
-  <style>
-    :root { --brand: #4f46e5; }
-    html,body{height:100%}
-    body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial; background:#f8fafc}
-    /* a few micro-ux helpers */
-    .card{background:#fff;border-radius:12px;box-shadow:0 6px 18px rgba(16,24,40,.06);}
-    .rounded-2xl{border-radius:1rem}
-    /* lightweight protection for videos */
-    .no-right-click{user-select:none}
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Intelligent Learning Platform</title>
+    <!-- Tailwind CSS for modern, responsive design -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Google Fonts for better typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        /* Base styles and dark mode variables */
+        :root { --bg-light: #f8fafc; --text-dark: #1f2937; --card-bg-light: #ffffff; }
+        .dark { --bg-light: #111827; --text-dark: #f3f4f6; --card-bg-light: #1f2937; }
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-light); color: var(--text-dark); transition: background-color 0.3s, color 0.3s; }
+        .card { background-color: var(--card-bg-light); transition: background-color 0.3s; }
+        .modal-backdrop { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0, 0, 0, 0.7); display: flex; align-items: center; justify-content: center; z-index: 50; }
+    </style>
 </head>
-<body class="min-h-screen flex flex-col text-gray-800">
+<body class="min-h-screen">
 
-<!-- App root -->
-<div id="app" class="flex-1 container mx-auto p-4 sm:p-6 lg:p-8"></div>
+    <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-3"></div>
+    <div id="app-container" class="max-w-7xl mx-auto p-4 md:p-8"></div>
+    <div id="modal-container" class="hidden"></div>
 
-<!-- Modal container -->
-<div id="modal-root"></div>
+    <script type="module">
+        // --- 1. FIREBASE IMPORTS (Storage is removed) ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { 
+            getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, doc, setDoc, onSnapshot, collection, query, addDoc, 
+            serverTimestamp, getDoc, updateDoc 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-<!-- Helpful template: service worker source (copy to /sw.js in your hosting) -->
-<template id="sw-template">
-  // ===== sw.js (copy this into a file named /sw.js on your hosting) =====
-  const CACHE_NAME = 'ilp-cache-v1';
-  const OFFLINE_URL = '/index.html';
-  const ASSETS = [
-    '/', '/index.html',
-    'https://cdn.tailwindcss.com',
-    'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap'
-  ];
+        // ====================================================================
+        // START: JAVASCRIPT MODULE SIMULATION
+        // Copy contents between markers into their respective .js files
+        // ====================================================================
 
-  self.addEventListener('install', (e) => {
-    self.skipWaiting();
-    e.waitUntil(
-      caches.open(CACHE_NAME).then(c => c.addAll(ASSETS.map(u=>new Request(u, {cache: 'reload'}))))
-    );
-  });
+        /**
+         * --------------------------------------------------------------------
+         * MODULE 1: CONFIG & STATE (Equivalent to js/config.js)
+         * Updated with IMGBB API key and new Firebase Config.
+         * --------------------------------------------------------------------
+         */
+        const APP_STATE = {
+            db: null, auth: null, userId: null, userProfile: null,
+            currentPage: 'home', pageParams: {}, isAuthReady: false,
+            isDarkMode: localStorage.getItem('darkMode') === 'true',
+            dataCache: { courses: [], subscriptions: [], progress: new Set(), userProfiles: new Map() }
+        };
 
-  self.addEventListener('activate', (e) => {
-    e.waitUntil(clients.claim());
-  });
+        const ENV = {
+            // Updated Firebase Config
+            firebaseConfig: {
+                apiKey: "AIzaSyAjPzI2w1ptxXjfF-nANHTg57zqfznOyVo",
+                authDomain: "daring-runway-406008.firebaseapp.com",
+                projectId: "daring-runway-406008",
+                storageBucket: "daring-runway-406008.firebasestorage.app",
+                messagingSenderId: "233176620103",
+                appId: "1:233176620103:web:643129a90e6a74f9e8e562",
+                measurementId: "G-ERF6KJT723"
+            },
+            // Provided IMGBB Key
+            IMGBB_API_KEY: '994244fa58d67f7d0f05ed58d03e7962',
+            appId: typeof __app_id !== 'undefined' ? __app_id : 'default-app-id',
+            initialAuthToken: typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null
+        };
+        
+        const COLLECTIONS = {
+            USERS: `artifacts/${ENV.appId}/users`,
+            PUBLIC_DATA: `artifacts/${ENV.appId}/public/data`
+        };
 
-  self.addEventListener('fetch', (e) => {
-    const req = e.request;
-    // serve cached first for GET requests, network fallback
-    if (req.method !== 'GET') return;
-    e.respondWith(
-      caches.match(req).then(cached => cached || fetch(req).then(res => {
-        // Put a copy in cache (best-effort)
-        const copy = res.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(req, copy));
-        return res;
-      }).catch(()=>caches.match(OFFLINE_URL)))
-    );
-  });
-</template>
 
-<script type="module">
-// ------------------
-// Single-file SPA logic
-// - Firebase modular SDK
-// - IndexedDB persistence for Firestore (offline)
-// - Local cache + denormalized reads
-// - ImgBB upload
-// - Lightweight UI with Tailwind
-// ------------------
+        /**
+         * --------------------------------------------------------------------
+         * MODULE 2: UTILITIES (Equivalent to js/utils.js)
+         * --------------------------------------------------------------------
+         */
+        const Utils = {
+            snapshotToData: (snapshot) => {
+                const data = [];
+                snapshot.forEach(doc => {
+                    data.push({ id: doc.id, ...doc.data() });
+                });
+                return data;
+            },
 
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
-import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
-import { getFirestore, enableIndexedDbPersistence, collection, doc, getDoc, setDoc, addDoc, query, where, orderBy, getDocs, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+            showToast: (message, type = 'info') => {
+                const container = document.getElementById('toast-container');
+                const colorMap = { success: 'bg-green-500', error: 'bg-red-500', info: 'bg-blue-500' };
+                const toast = document.createElement('div');
+                toast.className = `p-4 rounded-lg shadow-xl text-white ${colorMap[type] || 'bg-gray-700'} transition-all duration-300 transform translate-x-full opacity-0`;
+                toast.textContent = message;
 
-// ------------------ CONFIG (from user) ------------------
-const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyAjPzI2w1ptxXjfF-nANHTg57zqfznOyVo",
-  authDomain: "daring-runway-406008.firebaseapp.com",
-  projectId: "daring-runway-406008",
-  storageBucket: "daring-runway-406008.appspot.com",
-  messagingSenderId: "233176620103",
-  appId: "1:233176620103:web:643129a90e6a74f9e8e562",
-  measurementId: "G-ERF6KJT723"
-};
-const IMGBB_API_KEY = '994244fa58d67f7d0f05ed58d03e7962';
-const SUPER_ADMIN_EMAIL = 'ahmed.abdelrahmany2018@gmail.com';
+                container.appendChild(toast);
+                setTimeout(() => { toast.classList.remove('translate-x-full', 'opacity-0'); }, 10);
+                setTimeout(() => {
+                    toast.classList.add('translate-x-full', 'opacity-0');
+                    toast.addEventListener('transitionend', () => toast.remove());
+                }, 5000);
+            },
 
-// ------------------ APP STATE ------------------
-const appRoot = document.getElementById('app');
-const modalRoot = document.getElementById('modal-root');
-let appState = {
-  firebaseApp: null,
-  db: null,
-  auth: null,
-  user: null,
-  profile: null,
-  tutors: [],
-  courses: [],
-  subscriptions: [],
-  progress: []
-};
+            openModal: (contentHTML) => {
+                const modalContainer = document.getElementById('modal-container');
+                modalContainer.innerHTML = contentHTML;
+                modalContainer.classList.remove('hidden');
+                lucide.createIcons(); // Re-render icons inside modal
+            },
 
-// ------------------ INIT FIREBASE ------------------
-function initFirebase(){
-  appState.firebaseApp = initializeApp(FIREBASE_CONFIG);
-  appState.auth = getAuth(appState.firebaseApp);
-  appState.db = getFirestore(appState.firebaseApp);
+            closeModal: () => {
+                document.getElementById('modal-container').classList.add('hidden');
+            },
 
-  // Try enabling persistence (IndexedDB). If fails (multiple tabs) fallback gracefully.
-  enableIndexedDbPersistence(appState.db).catch(err=>{
-    console.warn('IndexedDB persistence not enabled:', err && err.message);
-  });
-}
+            // Exposed globally for HTML handlers
+            toggleDarkMode: () => {
+                APP_STATE.isDarkMode = !APP_STATE.isDarkMode;
+                document.documentElement.classList.toggle('dark', APP_STATE.isDarkMode);
+                localStorage.setItem('darkMode', APP_STATE.isDarkMode);
+                Router.renderApp(); 
+            }
+        };
 
-// ------------------ UTILS ------------------
-function el(tag, attrs={}, children=''){ const node = document.createElement(tag); Object.entries(attrs).forEach(([k,v])=>{ if(k.startsWith('on')) node.addEventListener(k.slice(2), v); else node.setAttribute(k,v); }); if(typeof children==='string') node.innerHTML = children; else if(Array.isArray(children)) children.forEach(c=>node.appendChild(typeof c==='string'? document.createTextNode(c) : c)); return node; }
+        // Expose critical utilities globally for direct HTML calls
+        window.showToast = Utils.showToast;
+        window.closeModal = Utils.closeModal;
+        window.toggleDarkMode = Utils.toggleDarkMode;
 
-function toast(msg, type='info'){
-  const colors = { info: 'bg-indigo-600', success: 'bg-green-600', error: 'bg-red-600' };
-  const t = el('div',{class: `fixed right-4 top-6 text-white px-4 py-2 rounded shadow ${colors[type]} z-50`}, msg);
-  document.body.appendChild(t); setTimeout(()=>t.remove(),3000);
-}
 
-// Save small caches to localStorage to reduce reads (helps stay within free tier)
-function saveCache(key, data){ try{ localStorage.setItem(`ilp:${key}`, JSON.stringify({ts:Date.now(),data})); }catch(e){} }
-function loadCache(key, maxAgeMs=1000*60*60){ try{ const raw=localStorage.getItem(`ilp:${key}`); if(!raw) return null; const parsed=JSON.parse(raw); if(Date.now()-parsed.ts>maxAgeMs) return null; return parsed.data;}catch(e){return null;} }
+        /**
+         * --------------------------------------------------------------------
+         * MODULE 3: SERVICES (Equivalent to js/services.js)
+         * Added IMGBB file upload logic.
+         * --------------------------------------------------------------------
+         */
+        const Service = {
+            /** Initializes Firebase and sets up authentication. */
+            init: async () => {
+                try {
+                    const app = initializeApp(ENV.firebaseConfig);
+                    APP_STATE.db = getFirestore(app);
+                    APP_STATE.auth = getAuth(app);
+                    // APP_STATE.storage is removed
+                    
+                    document.documentElement.classList.toggle('dark', APP_STATE.isDarkMode);
 
-// ------------------ ImgBB helper ------------------
-async function uploadImgBB(file){
-  const fd = new FormData(); fd.append('image', file);
-  const url = `https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`;
-  try{
-    const res = await fetch(url, { method: 'POST', body: fd });
-    const json = await res.json();
-    if(json.success) return json.data.url; else throw new Error(json.error?.message||'Upload failed');
-  }catch(e){ console.error(e); return null; }
-}
+                    const authPromise = ENV.initialAuthToken 
+                        ? signInWithCustomToken(APP_STATE.auth, ENV.initialAuthToken) 
+                        : signInAnonymously(APP_STATE.auth);
+                    await authPromise;
+                    
+                    onAuthStateChanged(APP_STATE.auth, (user) => {
+                        if (user) {
+                            APP_STATE.userId = user.uid;
+                            Service.setupListeners(user.uid);
+                        } else {
+                            APP_STATE.userId = null;
+                            APP_STATE.userProfile = null;
+                            APP_STATE.isAuthReady = true;
+                            Router.navigateTo('home');
+                        }
+                        APP_STATE.isAuthReady = true;
+                        Router.renderApp();
+                    });
+                } catch (error) {
+                    console.error("Error initializing Firebase/Auth:", error);
+                    Utils.showToast("Could not initialize the app. Check console.", 'error');
+                    APP_STATE.isAuthReady = true;
+                    Router.renderApp();
+                }
+            },
 
-// ------------------ AUTH FLOW ------------------
-async function startAuth(){
-  const provider = new GoogleAuthProvider();
-  try{ await signInWithPopup(appState.auth, provider); }catch(e){ console.error(e); toast('Sign-in failed','error'); }
-}
+            /** Sets up real-time listeners for the authenticated user's data. */
+            setupListeners: (userId) => {
+                const { db, dataCache } = APP_STATE;
 
-async function signOutUser(){ try{ await signOut(appState.auth); toast('Signed out','info'); }catch(e){console.error(e);} }
+                // 1. User Profile Listener
+                const userDocRef = doc(db, COLLECTIONS.PUBLIC_DATA, 'users', userId);
+                onSnapshot(userDocRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        const profile = docSnap.data();
+                        APP_STATE.userProfile = { id: userId, ...profile };
+                        dataCache.userProfiles.set(userId, APP_STATE.userProfile);
+                        Router.renderApp();
+                    } else {
+                        // Create default profile
+                        const newProfile = { 
+                            displayName: APP_STATE.auth.currentUser?.email || `User ${userId.substring(0, 5)}`,
+                            email: APP_STATE.auth.currentUser?.email || null,
+                            isTutor: false,
+                            joinedAt: serverTimestamp()
+                        };
+                        setDoc(userDocRef, newProfile).then(() => {
+                            APP_STATE.userProfile = { id: userId, ...newProfile };
+                            dataCache.userProfiles.set(userId, APP_STATE.userProfile);
+                            Utils.showToast('Welcome! Your profile has been created.', 'info');
+                            Router.renderApp();
+                        }).catch(e => console.error("Error creating profile:", e));
+                    }
+                });
 
-// When a new user signs in first time, create profile record with selected role.
-function showRoleModal(){
-  return new Promise(res=>{
-    modalRoot.innerHTML = '';
-    const wrap = el('div',{class:'fixed inset-0 flex items-center justify-center bg-black/40 p-4 z-40'});
-    const box = el('div',{class:'card p-6 max-w-md w-full text-center'});
-    box.innerHTML = `
-      <h3 class='text-xl font-bold mb-2'>Choose your role</h3>
-      <p class='text-sm text-gray-600 mb-4'>Select whether you'll be a student or a tutor.</p>
-      <div class='flex gap-3 justify-center'>
-        <button id='role-student' class='px-4 py-2 rounded bg-indigo-600 text-white'>Student</button>
-        <button id='role-tutor' class='px-4 py-2 rounded bg-green-600 text-white'>Tutor</button>
-      </div>
-    `;
-    wrap.appendChild(box); modalRoot.appendChild(wrap);
-    wrap.querySelector('#role-student').onclick=()=>{ modalRoot.innerHTML=''; res('student'); };
-    wrap.querySelector('#role-tutor').onclick=()=>{ modalRoot.innerHTML=''; res('tutor'); };
-  });
-}
+                // 2. Courses Listener (Public data)
+                const coursesQuery = query(collection(db, COLLECTIONS.PUBLIC_DATA, 'courses'));
+                onSnapshot(coursesQuery, (snapshot) => {
+                    APP_STATE.dataCache.courses = Utils.snapshotToData(snapshot);
+                    Router.renderApp();
+                });
 
-// Fetch or create user profile doc
-async function ensureUserProfile(user){
-  const uref = doc(appState.db, 'users', user.uid);
-  const snap = await getDoc(uref);
-  if(snap.exists()){ return { id: snap.id, ...snap.data() } }
-  // new user
-  const role = await showRoleModal();
-  const payload = { email: user.email, displayName: user.displayName||user.email.split('@')[0], role, createdAt: serverTimestamp() };
-  if(role==='tutor'){ payload.tutorStatus = 'underReview'; }
-  await setDoc(uref, payload);
-  return { id: user.uid, ...payload };
-}
+                // 3. Subscriptions Listener (Public data - for tutors to review)
+                const subscriptionsQuery = query(collection(db, COLLECTIONS.PUBLIC_DATA, 'subscriptions'));
+                onSnapshot(subscriptionsQuery, (snapshot) => {
+                    APP_STATE.dataCache.subscriptions = Utils.snapshotToData(snapshot);
+                    Router.renderApp();
+                });
 
-// ------------------ DATA LISTENERS (real-time where appropriate) ------------------
-let unsubscribers = [];
-function clearUnsubs(){ unsubscribers.forEach(u=>u()); unsubscribers=[]; }
+                // 4. Progress Listener (Private data)
+                const progressQuery = query(collection(db, COLLECTIONS.USERS, userId, 'progress'));
+                onSnapshot(progressQuery, (snapshot) => {
+                    APP_STATE.dataCache.progress = new Set(Utils.snapshotToData(snapshot).map(p => p.id));
+                    Router.renderApp();
+                });
+            },
 
-async function setupRealtime(profile){
-  clearUnsubs();
-  // Tutors: only show verified tutors — make sure tutors are denormalized on course docs
-  const cachedTutors = loadCache('tutors', 1000*60*30);
-  if(cachedTutors){ appState.tutors = cachedTutors; render(); }
+            /** Uploads a file to IMGBB and returns the URL. */
+            uploadImageToImgBB: async (file) => {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = async () => {
+                        const base64Image = reader.result.split(',')[1];
+                        
+                        const formData = new FormData();
+                        formData.append("image", base64Image);
 
-  const tutorsQ = query(collection(appState.db,'users'), where('role','==','tutor'), where('tutorStatus', '==', 'verified'));
-  const unsubTut = onSnapshot(tutorsQ, snap=>{ appState.tutors = snap.docs.map(d=>({ id:d.id, ...d.data() })); saveCache('tutors', appState.tutors); render(); });
-  unsubscribers.push(unsubTut);
+                        const apiUrl = `https://api.imgbb.com/1/upload?key=${ENV.IMGBB_API_KEY}`;
+                        
+                        try {
+                            const response = await fetch(apiUrl, {
+                                method: 'POST',
+                                body: formData,
+                            });
+                            
+                            if (!response.ok) {
+                                throw new Error(`IMGBB API returned status: ${response.status}`);
+                            }
 
-  // Courses (denormalized: store tutorName & tutorId on course doc to avoid expensive joins)
-  const cachedCourses = loadCache('courses', 1000*60*30);
-  if(cachedCourses){ appState.courses = cachedCourses; render(); }
-  const coursesQ = query(collection(appState.db, 'courses'), orderBy('createdAt','desc'));
-  const unsubCourses = onSnapshot(coursesQ, snap=>{ appState.courses = snap.docs.map(d=>({ id:d.id, ...d.data() })); saveCache('courses', appState.courses); render(); });
-  unsubscribers.push(unsubCourses);
+                            const result = await response.json();
+                            
+                            if (result.success && result.data && result.data.url) {
+                                resolve(result.data.url);
+                            } else {
+                                throw new Error(result.error?.message || 'IMGBB upload failed with no specific error.');
+                            }
 
-  // If student, their subscriptions & progress
-  if(profile.role==='student'){
-    const subsQ = query(collection(appState.db, 'subscriptions'), where('userId','==',profile.id));
-    const unsubSubs = onSnapshot(subsQ, snap=>{ appState.subscriptions = snap.docs.map(d=>({ id:d.id, ...d.data() })); render(); }); unsubscribers.push(unsubSubs);
+                        } catch (error) {
+                            console.error("IMGBB Upload Error:", error);
+                            Utils.showToast('Image upload failed. Check API key or file type.', 'error');
+                            reject(error);
+                        }
+                    };
+                    reader.onerror = (error) => reject(error);
+                    reader.readAsDataURL(file);
+                });
+            },
 
-    const progressQ = query(collection(appState.db, `users/${profile.id}/progress`));
-    const unsubProg = onSnapshot(progressQ, snap=>{ appState.progress = snap.docs.map(d=>({ lessonId:d.id, ...d.data() })); render(); }); unsubscribers.push(unsubProg);
-  }
+            /** Global sign out function. Exposed globally. */
+            signOutUser: async () => {
+                try {
+                    await signOut(APP_STATE.auth);
+                    Utils.showToast('Signed out successfully!', 'info');
+                } catch (error) {
+                    console.error("Sign out error:", error);
+                    Utils.showToast('Failed to sign out.', 'error');
+                }
+            },
+        };
 
-  // Admins/tutors see subscriptions relevant to them
-  if(profile.role==='tutor' || profile.role==='super_admin'){
-    const subsQ = profile.role==='super_admin' ? query(collection(appState.db,'subscriptions'), orderBy('subscriptionDate','desc')) : query(collection(appState.db,'subscriptions'), where('tutorId','==',profile.id));
-    const unsubAllSubs = onSnapshot(subsQ, snap=>{ /* store but keep lightweight */ appState.allSubscriptions = snap.docs.map(d=>({ id:d.id, ...d.data() })); render(); }); unsubscribers.push(unsubAllSubs);
-  }
-}
+        window.signOutUser = Service.signOutUser;
 
-// ------------------ RENDERING (simple router) ------------------
-let route = { name: 'loading', params: {} };
-function navigateTo(name, params={}){ route = { name, params }; render(); window.scrollTo(0,0); }
 
-function render(){
-  // top-level layout
-  appRoot.innerHTML = '';
-  const header = el('header',{class:'bg-white p-4 rounded-2xl mb-6 flex justify-between items-center'});
-  const navLeft = el('div',{}, [ el('div',{class:'text-2xl font-bold text-indigo-600 cursor-pointer', onclick:()=>navigateTo('dashboard')}, '🎓 Learn Platform') ]);
-  const navRight = el('div',{class:'flex items-center gap-3'});
-  if(appState.user && appState.profile){
-    navRight.appendChild(el('div',{class:'text-sm text-gray-700 hidden sm:block'}, `Hi, ${appState.profile.displayName}`));
-    navRight.appendChild(el('button',{class:'bg-indigo-600 text-white px-3 py-2 rounded', onclick: signOutUser}, 'Sign Out'));
-  } else {
-    navRight.appendChild(el('button',{class:'bg-blue-600 text-white px-3 py-2 rounded', onclick: startAuth}, 'Sign in with Google'));
-  }
-  header.appendChild(navLeft); header.appendChild(navRight);
-  appRoot.appendChild(header);
+        /**
+         * --------------------------------------------------------------------
+         * MODULE 4: COMPONENTS (Equivalent to js/components.js)
+         * --------------------------------------------------------------------
+         */
+        const UI = {
+            renderLoadingScreen: (message) => `
+                <div class="flex items-center justify-center p-16 text-gray-500 dark:text-gray-400">
+                    <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>${message}</span>
+                </div>
+            `,
 
-  // content
-  const main = el('main',{});
-  if(route.name==='loading'){
-    main.innerHTML = `<div class='text-center py-24'>Loading…</div>`;
-  } else if(route.name==='login'){
-    main.innerHTML = `
-      <div class='card p-8 max-w-2xl mx-auto text-center'>
-        <h1 class='text-3xl font-bold mb-2'>Welcome</h1>
-        <p class='text-gray-500 mb-6'>Sign in with Google to continue</p>
-        <button class='bg-blue-600 text-white px-5 py-2 rounded' onclick="startAuth()">Sign In</button>
-      </div>
-    `;
-  } else if(route.name==='dashboard'){
-    main.appendChild(renderDashboard());
-  } else if(route.name==='tutors'){
-    main.appendChild(renderTutors());
-  } else if(route.name==='course'){
-    main.appendChild(renderCoursePage(route.params.courseId));
-  } else if(route.name==='admin'){
-    main.appendChild(renderAdmin());
-  }
-  appRoot.appendChild(main);
-}
+            renderNotFound: () => `
+                <div class="text-center py-20">
+                    <h2 class="text-4xl font-bold text-red-600">404 - Page Not Found</h2>
+                    <p class="mt-4 text-lg dark:text-gray-300">The requested page does not exist.</p>
+                    <button onclick="Router.navigateTo('dashboard')" class="mt-6 bg-indigo-600 text-white px-6 py-2 rounded-lg shadow hover:bg-indigo-700 transition">Go to Dashboard</button>
+                </div>
+            `,
 
-function renderDashboard(){
-  const wrap = el('div', {class:'grid grid-cols-1 md:grid-cols-3 gap-6'});
-  const left = el('div',{class:'col-span-2'});
-  left.appendChild(el('h2',{class:'text-2xl font-bold mb-3'}, 'My Dashboard'));
-  // subscriptions quick cards
-  const subs = appState.subscriptions || [];
-  if(subs.length===0){ left.appendChild(el('div',{class:'card p-6'}, `You haven't subscribed to courses yet. `)); }
-  else{
-    const grid = el('div',{class:'grid grid-cols-1 gap-4'});
-    subs.forEach(s=>{
-      const course = appState.courses.find(c=>c.id===s.courseId) || { title: 'Unknown course' };
-      grid.appendChild(el('div',{class:'card p-4 flex justify-between items-center'}, [
-        el('div',{}, [ el('div',{class:'font-semibold'}, course.title), el('div',{class:'text-sm text-gray-500'}, `Status: ${s.status}`) ]),
-        el('div',{}, [ el('button',{class:'bg-indigo-600 text-white px-3 py-1 rounded', onclick:()=>navigateTo('course',{courseId:course.id})}, 'Open') ])
-      ]));
-    });
-    left.appendChild(grid);
-  }
+            renderHeader: () => {
+                const { userProfile, isDarkMode } = APP_STATE;
+                const userName = userProfile ? userProfile.displayName : 'Guest';
+                const profileSnippet = userProfile ? `
+                    <div class="flex items-center space-x-4">
+                        <span class="text-sm font-medium hidden sm:inline truncate max-w-[100px]">${userName}</span>
+                        <div class="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white font-bold text-sm">${userName[0]}</div>
+                    </div>
+                ` : `
+                    <span class="text-sm font-medium">Please wait...</span>
+                `;
 
-  const right = el('div',{});
-  right.appendChild(el('div',{class:'card p-4'}, [ el('h3',{class:'font-semibold mb-2'}, 'Browse Tutors'), el('button',{class:'mt-2 bg-green-600 text-white px-3 py-1 rounded', onclick:()=>navigateTo('tutors')}, 'Browse') ]));
-  wrap.appendChild(left); wrap.appendChild(right);
-  return wrap;
-}
+                return `
+                    <header class="card p-4 rounded-xl shadow-lg flex justify-between items-center sticky top-0 z-40 mb-4">
+                        <div class="flex items-center space-x-6">
+                            <h1 onclick="Router.navigateTo('dashboard')" class="text-xl font-extrabold text-indigo-600 cursor-pointer hover:text-indigo-800 transition">
+                                <span class="hidden sm:inline">IntelliLearn</span>
+                                <span class="sm:hidden">ILP</span>
+                            </h1>
+                            <nav class="hidden md:flex space-x-4">
+                                <button onclick="Router.navigateTo('dashboard')" class="text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition">Dashboard</button>
+                                <button onclick="Router.navigateTo('catalog')" class="text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition">Catalog</button>
+                                ${userProfile?.isTutor ? `
+                                    <button onclick="Router.navigateTo('add-course')" class="text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition">Add Course</button>
+                                    <button onclick="Router.navigateTo('manage-subscriptions')" class="text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition">Manage Subs</button>
+                                ` : ''}
+                            </nav>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            ${profileSnippet}
+                            <button onclick="Utils.toggleDarkMode()" class="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition" aria-label="Toggle Dark Mode">
+                                ${isDarkMode ? '<i data-lucide="sun" class="w-5 h-5"></i>' : '<i data-lucide="moon" class="w-5 h-5"></i>'}
+                            </button>
+                            <button onclick="Service.signOutUser()" class="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition" aria-label="Sign Out">
+                                <i data-lucide="log-out" class="w-5 h-5"></i>
+                            </button>
+                        </div>
+                    </header>
+                `;
+            },
+            
+            renderCourseCard: (course, isEnrolled = false) => `
+                <div class="card p-5 rounded-xl shadow-lg flex flex-col justify-between hover:shadow-xl transition">
+                    <div>
+                        <h3 class="text-xl font-semibold text-indigo-600">${course.title}</h3>
+                        <p class="text-gray-500 dark:text-gray-400 text-sm mt-1 mb-3">${course.description.substring(0, 100)}${course.description.length > 100 ? '...' : ''}</p>
+                        <p class="text-sm font-medium mb-3">Tutor: ${course.tutorName || 'N/A'}</p>
+                    </div>
+                    <div class="flex justify-between items-center mt-auto pt-3 border-t border-gray-100 dark:border-gray-700">
+                        <span class="text-lg font-bold text-green-600">$${course.price.toFixed(2)}</span>
+                        <button onclick="Router.navigateTo('course-details', { courseId: '${course.id}' })" 
+                                class="bg-indigo-500 text-white px-4 py-1.5 rounded-lg text-sm shadow hover:bg-indigo-600 transition">
+                            ${isEnrolled ? 'View Course' : 'Details'}
+                        </button>
+                    </div>
+                </div>
+            `,
 
-function renderTutors(){
-  const wrap = el('div', {});
-  wrap.appendChild(el('h2',{class:'text-2xl font-bold mb-4'}, 'Tutors'));
-  const grid = el('div',{class:'grid grid-cols-1 md:grid-cols-3 gap-6'});
-  appState.tutors.forEach(t=>{
-    const card = el('div',{class:'card p-6 text-center'}, [
-      el('img',{src:t.imageUrl||`https://ui-avatars.com/api/?name=${encodeURIComponent(t.displayName)}&background=e0e7ff&color=4f46e5`, class:'w-24 h-24 rounded-full mx-auto mb-3 object-cover'}),
-      el('div',{class:'font-semibold'}, t.displayName),
-      el('p',{class:'text-sm text-gray-500 my-2'}, t.bio||'—'),
-      el('div',{}, appState.courses.filter(c=>c.tutorId===t.id).slice(0,4).map(c=> el('button',{class:'m-1 px-3 py-1 bg-indigo-100 text-indigo-800 rounded text-sm', onclick:()=>navigateTo('course',{courseId:c.id})}, c.title)))
-    ]);
-    grid.appendChild(card);
-  });
-  wrap.appendChild(grid);
-  return wrap;
-}
+            renderDashboard: async () => {
+                const { userProfile, dataCache } = APP_STATE;
+                const courses = dataCache.courses;
 
-async function fetchCourseLessons(courseId){
-  // small read: lessons are stored as subcollection; prefer ordering field 'order'
-  const lessonsSnap = await getDocs(query(collection(appState.db, `courses/${courseId}/lessons`), orderBy('order')));
-  return lessonsSnap.docs.map(d=>({ id:d.id, ...d.data() }));
-}
+                const mySubscriptions = dataCache.subscriptions.filter(sub => 
+                    sub.userId === userProfile.id && sub.status === 'approved'
+                );
+                
+                const enrolledCourseIds = new Set(mySubscriptions.map(sub => sub.courseId));
+                const enrolledCourses = courses.filter(c => enrolledCourseIds.has(c.id));
+                const createdCourses = courses.filter(c => c.tutorId === userProfile.id);
 
-function renderCoursePage(courseId){
-  const course = appState.courses.find(c=>c.id===courseId);
-  const wrap = el('div',{});
-  if(!course) return el('div',{}, 'Course not found');
+                return `
+                    <section class="space-y-10">
+                        <div class="p-6 rounded-xl bg-indigo-50 dark:bg-gray-800 shadow-inner">
+                            <h2 class="text-3xl font-bold text-indigo-700 dark:text-indigo-400">Welcome back, ${userProfile.displayName}!</h2>
+                            <p class="mt-2 text-indigo-600 dark:text-indigo-300">Your User ID: <span class="font-mono text-xs p-1 bg-indigo-200 dark:bg-gray-700 rounded">${userProfile.id}</span></p>
+                            ${userProfile.isTutor ? '<p class="mt-1 text-lg font-semibold text-teal-600 dark:text-teal-400">You are registered as a Tutor.</p>' : ''}
+                        </div>
 
-  const header = el('div',{class:'card p-6 mb-4'}, [ el('h1',{class:'text-2xl font-bold'}, course.title), el('div',{class:'text-sm text-gray-500'}, `By ${course.tutorName||'—'}`), el('p',{class:'mt-3'}, course.description||'') ]);
-  wrap.appendChild(header);
+                        ${enrolledCourses.length > 0 ? `
+                            <div class="space-y-4">
+                                <h3 class="text-2xl font-semibold border-b pb-2 text-gray-800 dark:text-gray-200">My Enrolled Courses</h3>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    ${enrolledCourses.map(c => UI.renderCourseCard(c, true)).join('')}
+                                </div>
+                            </div>
+                        ` : `
+                            <div class="text-center p-10 card rounded-xl shadow">
+                                <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300">You are not currently enrolled in any courses.</h3>
+                                <p class="mt-2 text-gray-500">Explore the <a href="#" onclick="Router.navigateTo('catalog')" class="text-indigo-600 hover:underline">Catalog</a> to find your next lesson!</p>
+                            </div>
+                        `}
 
-  // subscription check
-  const mySub = (appState.subscriptions||[]).find(s=>s.courseId===courseId);
-  if(!mySub){ // show subscribe form
-    const f = el('form',{class:'card p-6 max-w-lg', onsubmit: async (ev)=>{
-      ev.preventDefault();
-      const paymentId = f.paymentId.value; const duration = f.duration.value; const proof = f.paymentProof.files[0];
-      if(!proof){ toast('Upload payment proof','error'); return; }
-      const url = await uploadImgBB(proof);
-      if(!url){ toast('Upload failed','error'); return; }
-      const payload = { userId: appState.profile.id, userName: appState.profile.displayName, userEmail: appState.profile.email, courseId, tutorId: course.tutorId, price: course.price||0, paymentId, duration, paymentProofUrl: url, status:'underReview', subscriptionDate: serverTimestamp(), reviewerRemark: '' };
-      await addDoc(collection(appState.db,'subscriptions'), payload);
-      toast('Subscription request submitted','success');
-      // small optimization: push into local subscriptions to reflect immediate UI
-      appState.subscriptions.push({ id:'pending-local', ...payload }); render();
-    }});
+                        ${userProfile.isTutor && createdCourses.length > 0 ? `
+                            <div class="space-y-4">
+                                <h3 class="text-2xl font-semibold border-b pb-2 text-gray-800 dark:text-gray-200">My Created Courses</h3>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    ${createdCourses.map(c => UI.renderCourseCard(c)).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                    </section>
+                `;
+            },
+            
+            renderCourseCatalog: async () => {
+                const { dataCache } = APP_STATE;
+                const courses = dataCache.courses;
 
-    f.innerHTML = `
-      <h3 class='text-lg font-semibold mb-3'>Subscribe — $${course.price||0}</h3>
-      <label class='block text-sm text-gray-600'>Payment Transaction ID<input name='paymentId' required class='mt-1 w-full p-2 border rounded' /></label>
-      <label class='block text-sm text-gray-600 mt-3'>Duration<select name='duration' required class='mt-1 w-full p-2 border rounded'><option>1 Month</option><option>3 Months</option><option>1 Year</option></select></label>
-      <label class='block text-sm text-gray-600 mt-3'>Payment Proof<input name='paymentProof' type='file' accept='image/*' required class='mt-1 w-full' /></label>
-      <button class='mt-4 bg-green-600 text-white px-4 py-2 rounded'>Submit</button>
-    `;
-    wrap.appendChild(f);
-  } else {
-    // show lessons (if subscribed or under review show limited view)
-    const sCard = el('div',{class:'card p-4 mb-4'}, `Status: ${mySub.status}`);
-    wrap.appendChild(sCard);
-    // load lessons and show collapsible
-    fetchCourseLessons(courseId).then(lessons=>{
-      const list = el('div',{});
-      lessons.forEach(l=>{
-        const det = el('details',{class:'group card p-3 mb-3'}, []);
-        det.innerHTML = `<summary class='font-semibold flex justify-between items-center cursor-pointer'>${l.order}. ${l.title} <span class='text-sm text-indigo-600'>Open</span></summary>`;
-        const content = el('div',{class:'mt-3'});
-        content.innerHTML = `
-          <div class='mb-2'>
-            <div class='aspect-w-16 aspect-h-9'>
-              <iframe src='${(l.youtubeUrl||'').replace('watch?v=','embed/')}' frameborder='0' allowfullscreen class='w-full h-64'></iframe>
-            </div>
-          </div>
-          <a class='block p-2 bg-indigo-50 rounded' href='${l.materialsUrl||'#'}' target='_blank'>Learning materials</a>
-          <a class='block p-2 bg-purple-50 rounded mt-2' href='${l.quizUrl||'#'}' target='_blank'>Quiz</a>
-          <div class='mt-3'><button class='px-3 py-1 bg-green-600 text-white rounded' onclick="markDone('${l.id}','${courseId}')">Mark as completed</button></div>
-        `;
-        det.appendChild(content);
-        list.appendChild(det);
-      });
-      wrap.appendChild(list);
-    });
-  }
-  return wrap;
-}
+                return `
+                    <section class="space-y-6">
+                        <h2 class="text-3xl font-bold text-gray-800 dark:text-gray-200 border-b pb-3">Course Catalog</h2>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                            ${courses.length > 0 ? courses.map(UI.renderCourseCard).join('') : UI.renderLoadingScreen('No courses found or still loading...')}
+                        </div>
+                    </section>
+                `;
+            },
 
-function renderAdmin(){
-  if(!appState.profile) return el('div',{}, 'No profile');
-  if(appState.profile.role==='student') return el('div',{}, 'Admins only');
-  return el('div',{}, [ el('h2',{class:'text-xl font-bold mb-2'}, 'Admin Panel — Work in progress') ]);
-}
+            renderCourseDetails: (courseId) => {
+                const { dataCache, userProfile } = APP_STATE;
+                const course = dataCache.courses.find(c => c.id === courseId);
 
-// ------------------ Small helpers used by inline onclicks (exposed) ------------------
-window.navigateTo = navigateTo; // small router exposure
-window.startAuth = startAuth;
-window.markDone = async (lessonId, courseId) => {
-  // mark progress doc in subcollection
-  const ref = doc(appState.db, `users/${appState.profile.id}/progress`, lessonId);
-  await setDoc(ref, { finished: true, finishedAt: serverTimestamp(), courseId });
-  toast('Marked finished','success');
-}
+                if (!course) return UI.renderNotFound();
 
-// ------------------ Listen to auth state ------------------
-function wireAuth(){
-  onAuthStateChanged(appState.auth, async (user)=>{
-    if(!user){ appState.user=null; appState.profile=null; clearUnsubs(); navigateTo('login'); render(); return; }
-    appState.user = user;
-    // optimistic local profile load to show UI quickly
-    const maybe = loadCache(`profile:${user.uid}`, 1000*60*60);
-    if(maybe){ appState.profile = maybe; }
-    render();
-    const profile = await ensureUserProfile(user);
-    appState.profile = profile; saveCache(`profile:${user.uid}`, profile);
-    // if super admin email -> set role if not present (useful if you seeded manually)
-    if(profile.email===SUPER_ADMIN_EMAIL && profile.role!=='super_admin'){ const uref=doc(appState.db,'users',user.uid); await setDoc(uref,{...profile,role:'super_admin'},{merge:true}); profile.role='super_admin'; }
-    await setupRealtime(profile);
-    navigateTo('dashboard'); render();
-  });
-}
+                const subscription = dataCache.subscriptions.find(sub => 
+                    sub.userId === userProfile.id && sub.courseId === courseId
+                );
+                
+                const isApproved = subscription?.status === 'approved';
+                const isUnderReview = subscription?.status === 'underReview';
+                const isCreator = course.tutorId === userProfile.id;
+                
+                let statusText = '';
+                if (isCreator) {
+                    statusText = '<span class="bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-300 px-3 py-1 rounded-full text-sm font-medium">Course Creator</span>';
+                } else if (isApproved) {
+                    statusText = '<span class="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 px-3 py-1 rounded-full text-sm font-medium">Enrolled (Approved)</span>';
+                } else if (isUnderReview) {
+                    statusText = `<span class="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300 px-3 py-1 rounded-full text-sm font-medium">Subscription Under Review</span>`;
+                } else if (course.price > 0) {
+                    statusText = `<button onclick="UI.openSubscriptionModal('${course.id}')" class="bg-green-600 text-white px-5 py-2 rounded-lg shadow-md hover:bg-green-700 transition font-semibold">Subscribe for $${course.price.toFixed(2)}</button>`;
+                } else {
+                    // Free course logic can be added here if needed, currently treated as pay-per-enroll.
+                    statusText = '<span class="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 px-3 py-1 rounded-full text-sm font-medium">Paid Course</span>';
+                }
 
-// ------------------ Service worker registration (optional) ------------------
-if('serviceWorker' in navigator){
-  // registration is attempted — ensure you copy the sw-template into /sw.js on your host
-  navigator.serviceWorker.register('/sw.js').then(()=>console.log('SW registered')).catch(e=>console.warn('SW reg failed - ensure /sw.js exists',e));
-}
+                // Lesson list rendering
+                const renderLessons = () => {
+                    if (!isApproved && !isCreator) {
+                        return `
+                            <p class="text-lg text-red-500 dark:text-red-400 p-4 border border-red-300 rounded-lg bg-red-50 dark:bg-red-900/50">
+                                Please complete your subscription to access lesson content.
+                            </p>
+                        `;
+                    }
 
-// ------------------ Boot ------------------
-initFirebase(); wireAuth(); navigateTo('loading'); render();
+                    return course.lessons.map((lesson, index) => {
+                        const lessonId = `${index}`;
+                        const lessonDocId = `${courseId}-${lessonId}`;
+                        const isDone = dataCache.progress.has(lessonDocId);
+                        const statusIcon = isDone 
+                            ? '<i data-lucide="check-circle" class="w-5 h-5 text-green-500"></i>' 
+                            : '<i data-lucide="circle" class="w-5 h-5 text-gray-400"></i>';
+                        
+                        const actionButton = !isDone 
+                            ? `<button onclick="Action.markLessonAsDone('${lessonId}', '${courseId}')" class="text-indigo-600 hover:text-indigo-800 transition text-sm font-medium">Mark as Done</button>`
+                            : `<span class="text-green-600 text-sm font-medium">Completed</span>`;
 
-// ------------------ NOTES for deployers (visible in console) ------------------
-console.log('APP: ready — small notes:\n- Copy the content of <template id="sw-template"> into /sw.js on your hosting to enable offline caching.\n- For minimizing Firestore reads: denormalize data (store tutorName on course docs), use short-lived local caches (localStorage), and prefer onSnapshot with simple queries.');
-</script>
+                        return `
+                            <li class="flex items-center justify-between p-4 card rounded-lg shadow-sm border border-gray-100 dark:border-gray-700">
+                                <div class="flex items-center space-x-3">
+                                    ${statusIcon}
+                                    <span class="font-medium dark:text-gray-100">Lesson ${index + 1}: ${lesson}</span>
+                                </div>
+                                ${actionButton}
+                            </li>
+                        `;
+                    }).join('');
+                };
 
+                return `
+                    <section class="space-y-6">
+                        <div class="card p-6 rounded-xl shadow-lg">
+                            <button onclick="Router.navigateTo('catalog')" class="text-indigo-600 hover:text-indigo-800 mb-4 flex items-center transition">
+                                <i data-lucide="arrow-left" class="w-5 h-5 mr-1"></i> Back to Catalog
+                            </button>
+                            <h2 class="text-3xl font-bold text-gray-800 dark:text-gray-200">${course.title}</h2>
+                            <div class="flex flex-wrap items-center space-x-4 mt-2 mb-4">
+                                ${statusText}
+                                <span class="text-gray-500 dark:text-gray-400 text-sm">Duration: ${course.duration}</span>
+                                <span class="text-gray-500 dark:text-gray-400 text-sm">Tutor: ${course.tutorName || 'N/A'}</span>
+                            </div>
+                            <p class="text-lg text-gray-600 dark:text-gray-300 mt-4">${course.description}</p>
+                        </div>
+
+                        <div class="card p-6 rounded-xl shadow-lg">
+                            <h3 class="text-2xl font-semibold border-b pb-3 mb-4 text-gray-800 dark:text-gray-200">Course Curriculum (${course.lessons.length} Lessons)</h3>
+                            <ul class="space-y-3">
+                                ${renderLessons()}
+                            </ul>
+                        </div>
+                    </section>
+                `;
+            },
+            
+            renderAddCourseForm: () => `
+                <section class="max-w-3xl mx-auto card p-8 rounded-xl shadow-lg">
+                    <h2 class="text-3xl font-bold text-indigo-600 mb-6">Create New Course</h2>
+                    <form onsubmit="Action.handleCourseSubmission(event)">
+                        <div class="space-y-4">
+                            <div>
+                                <label for="title" class="block text-sm font-medium dark:text-gray-300">Course Title</label>
+                                <input type="text" id="title" name="title" required class="mt-1 block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500">
+                            </div>
+                            <div>
+                                <label for="description" class="block text-sm font-medium dark:text-gray-300">Description</label>
+                                <textarea id="description" name="description" rows="4" required class="mt-1 block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label for="price" class="block text-sm font-medium dark:text-gray-300">Price ($)</label>
+                                    <input type="number" id="price" name="price" min="0" step="0.01" required class="mt-1 block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label for="duration" class="block text-sm font-medium dark:text-gray-300">Duration (e.g., 4 weeks)</label>
+                                    <input type="text" id="duration" name="duration" required class="mt-1 block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                            </div>
+                            <div>
+                                <label for="lessons" class="block text-sm font-medium dark:text-gray-300">Lessons (One per line)</label>
+                                <textarea id="lessons" name="lessons" rows="6" placeholder="Lesson 1: Introduction to X&#10;Lesson 2: Core Concepts&#10;Lesson 3: Project Workshop" class="mt-1 block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                            </div>
+                        </div>
+                        <button type="submit" class="w-full mt-6 bg-indigo-600 text-white font-semibold py-3 rounded-lg shadow-md hover:bg-indigo-700 transition disabled:opacity-50">
+                            Add Course
+                        </button>
+                    </form>
+                </section>
+            `,
+
+            renderSubscriptionManagement: async () => {
+                const { dataCache, userProfile } = APP_STATE;
+                const subscriptions = dataCache.subscriptions;
+                const myCourses = dataCache.courses.filter(c => c.tutorId === userProfile.id).map(c => c.id);
+                
+                const relevantSubscriptions = subscriptions.filter(sub => myCourses.includes(sub.courseId));
+                const courseMap = new Map(dataCache.courses.map(c => [c.id, c.title]));
+                
+                const groupedSubs = relevantSubscriptions.reduce((acc, sub) => {
+                    acc[sub.status] = acc[sub.status] || [];
+                    acc[sub.status].push(sub);
+                    return acc;
+                }, {});
+
+                const renderSubscriptionRow = (sub) => {
+                    const isUnderReview = sub.status === 'underReview';
+                    return `
+                        <tr class="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
+                            <td class="p-3 text-sm font-medium text-gray-900 dark:text-gray-100 truncate max-w-[150px]">${sub.userName}</td>
+                            <td class="p-3 text-sm text-gray-700 dark:text-gray-300">${courseMap.get(sub.courseId) || 'N/A'}</td>
+                            <td class="p-3 text-sm text-green-600 font-bold">$${sub.price.toFixed(2)}</td>
+                            <td class="p-3 text-sm">
+                                <a href="${sub.paymentProofUrl}" target="_blank" class="text-indigo-600 hover:underline flex items-center">
+                                    <i data-lucide="image" class="w-4 h-4 mr-1"></i> View Proof
+                                </a>
+                            </td>
+                            <td class="p-3 text-sm">
+                                ${sub.reviewerRemark ? `<span class="italic text-gray-500 dark:text-gray-400">${sub.reviewerRemark}</span>` : 'N/A'}
+                            </td>
+                            <td class="p-3 text-sm">
+                                ${isUnderReview ? `
+                                    <div class="flex space-x-2">
+                                        <button onclick="Action.updateSubscriptionStatus('${sub.id}', true)" 
+                                                class="bg-green-500 text-white px-3 py-1 rounded-lg text-xs hover:bg-green-600 transition">Approve</button>
+                                        <button onclick="Action.updateSubscriptionStatus('${sub.id}', false)" 
+                                                class="bg-red-500 text-white px-3 py-1 rounded-lg text-xs hover:bg-red-600 transition">Reject</button>
+                                    </div>
+                                ` : `<span class="capitalize text-${sub.status === 'approved' ? 'green' : 'red'}-600 font-medium">${sub.status}</span>`}
+                            </td>
+                        </tr>
+                    `;
+                };
+
+                const renderSubscriptionTable = (title, subs) => `
+                    <div class="mb-8">
+                        <h3 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-200">${title} (${subs.length})</h3>
+                        <div class="overflow-x-auto card rounded-lg shadow-lg">
+                            <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                <thead class="bg-gray-50 dark:bg-gray-700">
+                                    <tr>
+                                        <th class="p-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Student Name</th>
+                                        <th class="p-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Course</th>
+                                        <th class="p-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Price</th>
+                                        <th class="p-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Payment Proof</th>
+                                        <th class="p-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Remark</th>
+                                        <th class="p-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-800">
+                                    ${subs.map(renderSubscriptionRow).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+
+
+                return `
+                    <section class="space-y-6">
+                        <h2 class="text-3xl font-bold text-gray-800 dark:text-gray-200 border-b pb-3">Subscription Management</h2>
+                        
+                        ${relevantSubscriptions.length === 0 ? `
+                            <div class="text-center p-10 card rounded-xl shadow">
+                                <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300">No subscription requests for your courses.</h3>
+                            </div>
+                        ` : ''}
+
+                        ${groupedSubs.underReview && groupedSubs.underReview.length > 0 ? renderSubscriptionTable('New Requests (Under Review)', groupedSubs.underReview) : ''}
+                        ${groupedSubs.approved && groupedSubs.approved.length > 0 ? renderSubscriptionTable('Approved Subscriptions', groupedSubs.approved) : ''}
+                        ${groupedSubs.rejected && groupedSubs.rejected.length > 0 ? renderSubscriptionTable('Rejected Subscriptions', groupedSubs.rejected) : ''}
+                    </section>
+                `;
+            },
+            
+            openSubscriptionModal: (courseId) => {
+                const course = APP_STATE.dataCache.courses.find(c => c.id === courseId);
+                if (!course) return Utils.showToast('Course not found.', 'error');
+
+                const contentHTML = `
+                    <div class="modal-backdrop" onclick="Utils.closeModal()">
+                        <div class="card p-8 rounded-xl w-full max-w-md mx-4 shadow-2xl" onclick="event.stopPropagation()">
+                            <div class="flex justify-between items-start mb-4 border-b pb-3 dark:border-gray-700">
+                                <h3 class="text-2xl font-bold text-indigo-600">Subscribe to: ${course.title}</h3>
+                                <button onclick="Utils.closeModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition">
+                                    <i data-lucide="x" class="w-6 h-6"></i>
+                                </button>
+                            </div>
+                            <p class="mb-4 text-gray-600 dark:text-gray-300">Total Price: <span class="text-green-600 font-bold text-xl">$${course.price.toFixed(2)}</span></p>
+
+                            <form onsubmit="Action.handleSubscriptionRequest(event)" 
+                                data-course-id="${course.id}" 
+                                data-tutor-id="${course.tutorId}"
+                                data-price="${course.price}"
+                                data-duration="${course.duration}">
+                                
+                                <div class="space-y-4">
+                                    <div>
+                                        <label for="paymentId" class="block text-sm font-medium dark:text-gray-300">Your Payment/Transaction ID</label>
+                                        <input type="text" id="paymentId" name="paymentId" required class="mt-1 block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500">
+                                    </div>
+                                    <div>
+                                        <label for="paymentProof" class="block text-sm font-medium dark:text-gray-300">Upload Payment Proof (Image)</label>
+                                        <input type="file" id="paymentProof" name="paymentProof" accept="image/*" required class="mt-1 block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500">
+                                    </div>
+                                </div>
+
+                                <button type="submit" class="w-full mt-6 bg-indigo-600 text-white font-semibold py-3 rounded-lg shadow-md hover:bg-indigo-700 transition disabled:opacity-50">
+                                    <span id="btn-text">Submit Subscription Request</span>
+                                    <span id="spinner" class="hidden animate-spin h-5 w-5 mr-3" role="status">⚙️</span>
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                `;
+                Utils.openModal(contentHTML);
+            }
+        };
+
+        // Expose openSubscriptionModal globally for direct HTML calls
+        window.openSubscriptionModal = UI.openSubscriptionModal;
+
+
+        /**
+         * --------------------------------------------------------------------
+         * MODULE 5: ACTIONS (Equivalent to js/actions.js)
+         * Updated to use IMGBB for image uploads.
+         * --------------------------------------------------------------------
+         */
+        const Action = {
+            /** Handles the course submission (for Tutors). */
+            handleCourseSubmission: async (event) => {
+                event.preventDefault();
+                const { db, userProfile } = APP_STATE;
+
+                if (!userProfile?.isTutor) { Utils.showToast('Permission denied to add course.', 'error'); return; }
+
+                const form = event.target;
+                const courseData = {
+                    title: form.title.value, description: form.description.value,
+                    price: parseFloat(form.price.value) || 0, duration: form.duration.value,
+                    tutorId: userProfile.id, tutorName: userProfile.displayName,
+                    lessons: (form.lessons.value || '').split('\n').map(l => l.trim()).filter(l => l),
+                    createdAt: serverTimestamp()
+                };
+
+                const button = form.querySelector('button[type="submit"]');
+                const originalText = button.innerHTML;
+                button.disabled = true;
+                button.innerHTML = '<span class="animate-spin mr-2">⚙️</span> Adding...';
+
+                try {
+                    await addDoc(collection(db, COLLECTIONS.PUBLIC_DATA, 'courses'), courseData);
+                    Utils.showToast('Course added successfully!', 'success');
+                    Router.navigateTo('catalog');
+                } catch (error) {
+                    console.error('Error adding course:', error);
+                    Utils.showToast('Failed to add course. See console.', 'error');
+                } finally {
+                    button.disabled = false;
+                    button.innerHTML = originalText;
+                }
+            },
+
+            /** Handles the subscription request submission. */
+            handleSubscriptionRequest: async (event) => {
+                event.preventDefault();
+                const { db, userProfile } = APP_STATE;
+
+                if (!userProfile) { Utils.showToast('Please sign in to subscribe.', 'error'); return; }
+
+                const form = event.target;
+                const { courseId, tutorId, price, duration } = form.dataset;
+                const paymentId = form.paymentId.value;
+                const paymentProofFile = form.paymentProof.files[0];
+
+                if (!paymentProofFile) { Utils.showToast('Please upload a payment proof image.', 'error'); return; }
+
+                const button = form.querySelector('button[type="submit"]');
+                const btnText = button.querySelector('#btn-text');
+                const spinner = button.querySelector('#spinner');
+                btnText.classList.add('hidden'); spinner.classList.remove('hidden'); button.disabled = true;
+
+                try {
+                    // 1. Upload payment proof image to IMGBB
+                    Utils.showToast('Uploading payment proof...', 'info');
+                    const paymentProofUrl = await Service.uploadImageToImgBB(paymentProofFile);
+
+                    if (!paymentProofUrl) {
+                        throw new Error("Image upload failed to provide a URL.");
+                    }
+
+                    // 2. Create subscription request document
+                    const subscriptionData = {
+                        userId: userProfile.id, userName: userProfile.displayName, userEmail: userProfile.email,
+                        courseId, tutorId, price: parseFloat(price), paymentId, duration, paymentProofUrl,
+                        status: 'underReview', subscriptionDate: serverTimestamp(), reviewerRemark: ''
+                    };
+                    await addDoc(collection(db, COLLECTIONS.PUBLIC_DATA, 'subscriptions'), subscriptionData);
+                    
+                    Utils.showToast('Subscription request sent successfully! Awaiting tutor review.', 'success');
+                    Utils.closeModal();
+                    Router.navigateTo('dashboard');
+                } catch (error) {
+                    // Specific error handling is done inside uploadImageToImgBB, here we just catch general flow errors
+                    if (!error.message.includes('IMGBB')) { // Avoid double toast/log if error came from image upload
+                        console.error('Subscription error:', error);
+                        Utils.showToast('Failed to send subscription request.', 'error');
+                    }
+                } finally {
+                    btnText.classList.remove('hidden'); spinner.classList.add('hidden'); button.disabled = false;
+                }
+            },
+
+            /** Marks a lesson as done for the current user. */
+            markLessonAsDone: async (lessonId, courseId) => {
+                const { db, userId } = APP_STATE;
+                if (!userId) { Utils.showToast('You must be signed in.', 'error'); return; }
+
+                const lessonDocId = `${courseId}-${lessonId}`;
+                const progressRef = doc(db, COLLECTIONS.USERS, userId, 'progress', lessonDocId);
+
+                try {
+                    await setDoc(progressRef, {
+                        finished: true, finishedAt: serverTimestamp(), courseId: courseId, lessonIndex: parseInt(lessonId), id: lessonDocId
+                    });
+                    Utils.showToast('Lesson marked as completed!', 'success');
+                } catch (error) {
+                    console.error("Error marking lesson done:", error);
+                    Utils.showToast('Failed to update progress.', 'error');
+                }
+            },
+
+            /** Approves or rejects a subscription request (for Tutors). */
+            updateSubscriptionStatus: async (subscriptionId, approve) => {
+                const { db, userProfile } = APP_STATE;
+                if (!userProfile?.isTutor) return Utils.showToast('Permission denied.', 'error');
+
+                const status = approve ? 'approved' : 'rejected';
+                // Using prompt per instruction to gather input
+                const remark = prompt(`Enter a brief remark for the ${status} status:`); 
+                if (remark === null) return; 
+
+                const subRef = doc(db, COLLECTIONS.PUBLIC_DATA, 'subscriptions', subscriptionId);
+                
+                try {
+                    await updateDoc(subRef, {
+                        status: status, reviewerRemark: remark, reviewDate: serverTimestamp()
+                    });
+                    Utils.showToast(`Subscription ${status} successfully!`, 'success');
+                } catch (error) {
+                    console.error(`Error updating subscription:`, error);
+                    Utils.showToast(`Failed to update subscription status.`, 'error');
+                }
+            }
+        };
+
+        // Expose action handlers globally for direct HTML calls
+        window.handleCourseSubmission = Action.handleCourseSubmission;
+        window.handleSubscriptionRequest = Action.handleSubscriptionRequest;
+        window.updateSubscriptionStatus = Action.updateSubscriptionStatus;
+
+
+        /**
+         * --------------------------------------------------------------------
+         * MODULE 6: ROUTER (Equivalent to js/router.js)
+         * --------------------------------------------------------------------
+         */
+        const Router = {
+            /** Updates the application state and triggers a re-render. Exposed globally. */
+            navigateTo: (page, params = {}) => {
+                APP_STATE.currentPage = page;
+                APP_STATE.pageParams = params;
+                history.pushState({ page, params }, '', `#${page}`);
+                Router.renderApp();
+            },
+
+            /** Handles browser back/forward navigation. */
+            onPopState: (event) => {
+                if (event.state) {
+                    APP_STATE.currentPage = event.state.page || 'dashboard';
+                    APP_STATE.pageParams = event.state.params || {};
+                }
+                Router.renderApp();
+            },
+
+            /** The main render function that coordinates UI updates. */
+            renderApp: async () => {
+                const appContainer = document.getElementById('app-container');
+                
+                // 1. Always render the Header/Nav first
+                appContainer.innerHTML = UI.renderHeader();
+                const mainContent = document.createElement('main');
+                mainContent.id = 'main-content-area';
+                mainContent.className = 'mt-6';
+                appContainer.appendChild(mainContent);
+
+                if (!APP_STATE.isAuthReady || !APP_STATE.userProfile) {
+                    mainContent.innerHTML = UI.renderLoadingScreen('Initializing application...');
+                    return;
+                }
+
+                // 2. Render the current page content
+                const { currentPage, userProfile } = APP_STATE;
+                switch (currentPage) {
+                    case 'home':
+                    case 'dashboard':
+                        mainContent.innerHTML = await UI.renderDashboard();
+                        break;
+                    case 'catalog':
+                        mainContent.innerHTML = await UI.renderCourseCatalog();
+                        break;
+                    case 'course-details':
+                        mainContent.innerHTML = UI.renderCourseDetails(APP_STATE.pageParams.courseId);
+                        break;
+                    case 'add-course':
+                        mainContent.innerHTML = userProfile.isTutor ? UI.renderAddCourseForm() : UI.renderNotFound();
+                        break;
+                    case 'manage-subscriptions':
+                        mainContent.innerHTML = userProfile.isTutor ? await UI.renderSubscriptionManagement() : UI.renderNotFound();
+                        break;
+                    default:
+                        mainContent.innerHTML = UI.renderNotFound();
+                }
+                
+                // 3. Re-render icons after content is loaded
+                lucide.createIcons();
+            }
+        };
+
+        // Expose router functions globally
+        window.navigateTo = Router.navigateTo;
+        window.onpopstate = Router.onPopState;
+
+
+        /**
+         * --------------------------------------------------------------------
+         * MODULE 7: MAIN ENTRY POINT (Equivalent to main.js)
+         * --------------------------------------------------------------------
+         */
+        Service.init();
+
+        // ====================================================================
+        // END: JAVASCRIPT MODULE SIMULATION
+        // ====================================================================
+
+    </script>
 </body>
 </html>
